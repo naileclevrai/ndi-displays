@@ -72,7 +72,7 @@ public class NdiDisplays {
 
     /**
      * 90° corner cabinet: a one-block quarter-cylinder that joins two cardinal LED runs into
-     * a single path wall. Sneak-place for the inner (concave) form.
+     * a single path wall. Outer item = convex wrap; inner item = concave in-corner.
      */
     public static final RegistryObject<Block> LED_CORNER = BLOCKS.register("led_corner",
             () -> new LedCornerBlock(BlockBehaviour.Properties.of()
@@ -83,7 +83,10 @@ public class NdiDisplays {
                     .lightLevel(state -> 0)));
 
     public static final RegistryObject<Item> LED_CORNER_ITEM = ITEMS.register("led_corner",
-            () -> new BlockItem(LED_CORNER.get(), new Item.Properties()));
+            () -> new dev.nano.ndidisplays.item.LedCornerItem(LED_CORNER.get(), new Item.Properties(), true));
+
+    public static final RegistryObject<Item> LED_INNER_CORNER_ITEM = ITEMS.register("led_inner_corner",
+            () -> new dev.nano.ndidisplays.item.LedCornerItem(LED_CORNER.get(), new Item.Properties(), false));
 
     public static final RegistryObject<BlockEntityType<LedPanelBlockEntity>> LED_PANEL_BE = BLOCK_ENTITIES.register("led_panel",
             () -> BlockEntityType.Builder.of(LedPanelBlockEntity::new,
@@ -463,6 +466,7 @@ public class NdiDisplays {
                     .displayItems((params, output) -> {
                         output.accept(LED_PANEL_ITEM.get());
                         output.accept(LED_CORNER_ITEM.get());
+                        output.accept(LED_INNER_CORNER_ITEM.get());
                         output.accept(BLOW_THROUGH_PANEL_ITEM.get());
                         output.accept(LED_FLOOR_ITEM.get());
                         output.accept(KINETIC_WINCH_ITEM.get());

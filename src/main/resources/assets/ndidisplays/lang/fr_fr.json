@@ -26,6 +26,7 @@
  "gui.ndidisplays.pad.stick_axes": "axes %s / %s",
  "gui.ndidisplays.pad.stick_summary": "Vol : %s Visée : %s",
  "block.ndidisplays.led_corner": "Cabinet LED d'angle",
+ "item.ndidisplays.led_inner_corner": "Cabinet LED d'angle rentrant",
  "block.ndidisplays.chain_hoist": "Palan à chaîne",
  "gui.ndidisplays.hoist.title": "Palan à chaîne - boîte à boutons",
  "gui.ndidisplays.hoist.up": "MONTÉE",

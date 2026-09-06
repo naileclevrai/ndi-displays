@@ -7,6 +7,10 @@ Current artifact: **`ndidisplays-1.20.1-1.1.1-beta.1-all.jar`** — Minecraft **
 
 ## [Unreleased]
 
+### Added
+
+- [LED inner corner](/blocks/led-panel#90-turns) (`led_inner_corner`) — concave wrap for room corners.
+
 ## [1.1.1-beta.1] - 2026-09-06
 
 Second CurseForge beta. Includes upstream `main` through `150b536`.

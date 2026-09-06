@@ -247,6 +247,7 @@
  "gui.ndidisplays.pad.axis.4": "Left trigger",
  "gui.ndidisplays.pad.axis.5": "Right trigger",
  "block.ndidisplays.led_corner": "LED Corner Cabinet",
+ "item.ndidisplays.led_inner_corner": "LED Inner Corner Cabinet",
  "block.ndidisplays.chain_hoist": "Chain Hoist",
  "gui.ndidisplays.hoist.title": "Chain Hoist - Motor Pendant",
  "gui.ndidisplays.hoist.up": "UP",
