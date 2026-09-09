@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Camera range is configurable: `cameraRange` (blocks) and `cameraRangeUnlimited` in the client config, with a slider and switch on the mod's options page. Cameras past the range stop sending until the player returns.
+
 ## [1.1.1-beta.1] - 2026-09-06
 
 Second CurseForge beta. Ship **`ndidisplays-1.20.1-1.1.1-beta.1-all.jar`**. Includes [nanocodium/ndi-displays](https://github.com/nanocodium/ndi-displays) `main` through `150b536` (their post-1.1.0-beta.1 work was not in their changelog).

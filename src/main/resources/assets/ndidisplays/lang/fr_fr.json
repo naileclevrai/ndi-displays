@@ -1,4 +1,8 @@
 {
+ "gui.ndidisplays.options.title": "NDI Stage Displays",
+ "gui.ndidisplays.options.range": "Portée des caméras : %s blocs",
+ "gui.ndidisplays.options.range_unlimited": "Portée des caméras illimitée",
+ "gui.ndidisplays.options.range_hint": "Les caméras plus éloignées cessent d'émettre jusqu'à votre retour.",
  "gui.ndidisplays.pad.open": "Manette drone…",
  "gui.ndidisplays.pad.title": "Manette drone",
  "gui.ndidisplays.pad.hint": "Clique un bind, puis appuie sur un bouton. Calibre les sticks en les bougeant.",

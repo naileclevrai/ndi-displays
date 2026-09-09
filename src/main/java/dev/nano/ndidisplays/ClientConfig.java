@@ -25,6 +25,10 @@ public final class ClientConfig {
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.EnumValue<BroadcastMode> BROADCAST_MODE;
     public static final ForgeConfigSpec.BooleanValue HANDHELD_BROADCAST;
+    public static final ForgeConfigSpec.IntValue CAMERA_RANGE;
+    public static final ForgeConfigSpec.BooleanValue CAMERA_RANGE_UNLIMITED;
+    public static final int CAMERA_RANGE_MIN = 16;
+    public static final int CAMERA_RANGE_MAX = 1024;
     public static final ForgeConfigSpec.ConfigValue<String> DRONE_PAD_CLIMB;
     public static final ForgeConfigSpec.ConfigValue<String> DRONE_PAD_DESCEND;
     public static final ForgeConfigSpec.ConfigValue<String> DRONE_PAD_EXIT;
@@ -53,6 +57,16 @@ public final class ClientConfig {
                         "Unlike rigs this is named per player, so several players can each carry",
                         "one without clashing — handy for roving operators.")
                 .define("handheld", true);
+        CAMERA_RANGE = builder
+                .comment("Distance in blocks from the player beyond which a camera stops sending.",
+                        "A rig further away than this renders nothing and its NDI source goes idle;",
+                        "it resumes as soon as the player is back in range. Cameras can only see",
+                        "sections the player's own render distance has loaded, so a value far past",
+                        "that just films fog.")
+                .defineInRange("cameraRange", 96, CAMERA_RANGE_MIN, CAMERA_RANGE_MAX);
+        CAMERA_RANGE_UNLIMITED = builder
+                .comment("Ignore cameraRange: every active camera in the loaded world keeps sending.")
+                .define("cameraRangeUnlimited", false);
         builder.pop();
 
         builder.comment("Drone gamepad bindings. Values are button:N, axis:N, or unbound.",

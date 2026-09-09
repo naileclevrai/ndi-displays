@@ -16,7 +16,10 @@ import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
-/** Adds a Drone controller button to vanilla Options / Controls, and the mod config. */
+/**
+ * Adds a Drone controller button to vanilla Options / Controls, and registers the mod's
+ * options page (camera range, drone controller) as its config screen.
+ */
 public final class DroneOptionsHooks {
 
     private DroneOptionsHooks() {
@@ -33,7 +36,7 @@ public final class DroneOptionsHooks {
         public static void onClientSetup(FMLClientSetupEvent event) {
             ModLoadingContext.get().registerExtensionPoint(ConfigScreenHandler.ConfigScreenFactory.class,
                     () -> new ConfigScreenHandler.ConfigScreenFactory(
-                            (mc, parent) -> new DronePadOptionsScreen(parent)));
+                            (mc, parent) -> new dev.nano.ndidisplays.client.gui.NdiOptionsScreen(parent)));
         }
     }
 
