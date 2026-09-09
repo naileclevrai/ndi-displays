@@ -23,6 +23,7 @@ Second CurseForge beta. Ship **`ndidisplays-1.20.1-1.1.1-beta.1-all.jar`**. Incl
 - First person shows the whole shoulder rig, not only the finder. The monitor copy is opaque (sky horizon had alpha 0).
 - Blow-through picture is brighter and taller against the cabinet bars; coverage ~60%; bloom goes through the transparent MRT, not a solid-wall pass.
 - Palette atlas strips are 16 px tall so the block atlas keeps its full mip chain.
+- Rack units are 12% wider and deeper and grow to the slot pitch, filling the frame instead of floating in it.
 - Creative tab icon is the NDI configuration card (the LED panel read as empty on the dark tab).
 
 ### Fixed
