@@ -84,8 +84,21 @@ public final class NdiManager {
             LOGGER.info("[ndidisplays] NDI runtime initialised: {}", ndiVersion());
         } catch (Throwable t) {
             available = false;
-            status = "NDI runtime not found — install the NDI runtime (ndi.video/tools)";
-            LOGGER.warn("[ndidisplays] Could not initialise NDI: {}", t.toString());
+            // Devolay fails inside a static initialiser, so the exception the caller sees is
+            // the wrapper; the message that says what actually went wrong is on the cause.
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) {
+                root = root.getCause();
+            }
+            String os = System.getProperty("os.name") + " " + System.getProperty("os.arch");
+            boolean noNatives = root.getMessage() != null
+                    && root.getMessage().contains("not compiled for your OS");
+            status = noNatives
+                    ? "NDI unavailable: no native library for " + os
+                    : "NDI runtime not found — install the NDI runtime (ndi.video/tools)";
+            LOGGER.warn("[ndidisplays] Could not initialise NDI on {} (Java {}): {}", os,
+                    System.getProperty("java.version"), root.toString());
+            LOGGER.debug("[ndidisplays] NDI initialisation failure", t);
         }
     }
 
