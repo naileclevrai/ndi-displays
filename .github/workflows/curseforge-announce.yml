@@ -1,16 +1,15 @@
 # Announces a CurseForge file the moment it has passed review.
 #
 # CurseForge sends no notification when a file is approved, so this polls: every 15 minutes it
-# lists the project's files through the CurseForge API (only approved, publicly visible files are
-# returned), and any file newer than the last one announced is posted to Discord with its
-# CurseForge changelog and download link. The high-water mark is committed back to the repo in
-# .github/curseforge-announced.json so the poller never announces a file twice.
+# lists the project's files through CFWidget (api.cfwidget.com), a keyless public mirror of the
+# CurseForge API that only carries approved, publicly visible files. Any file newer than the last
+# one announced is posted to Discord with that version's section of CHANGELOG.md and its download
+# link. The high-water mark is committed back to the repo in .github/curseforge-announced.json so
+# the poller never announces a file twice.
 #
 # Repository settings this needs:
 #   secret   DISCORD_WEBHOOK         the channel webhook URL
-#   secret   CURSEFORGE_API_KEY      an API key from console.curseforge.com
 #   variable CURSEFORGE_PROJECT_ID   the numeric project id (shown on the project page, "About Project")
-#   variable CURSEFORGE_SLUG         the project's URL slug, e.g. ndi-stage-displays
 name: CurseForge approval announce
 
 on:
@@ -35,7 +34,6 @@ jobs:
       - name: Find newly approved files
         id: poll
         env:
-          CF_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
           PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID }}
         shell: bash
         run: |
@@ -49,12 +47,12 @@ jobs:
             echo "seed=false" >> "$GITHUB_OUTPUT"
             LAST=$(jq -r '.lastFileId // 0' "$STATE")
           fi
-          curl -sS -f -H "x-api-key: ${CF_KEY}" -H "Accept: application/json" \
-            "https://api.curseforge.com/v1/mods/${PROJECT}/files?pageSize=50" > files.json
-          # fileStatus 4 is Approved; the endpoint already hides unapproved files, the filter is
-          # belt and braces. Oldest first, so several approvals post in order.
-          jq --argjson last "$LAST" \
-            '[.data[] | select(.fileStatus == 4 and .id > $last)] | sort_by(.id)' files.json > new.json
+          # CFWidget refreshes its copy of a project every few minutes; a miss here is retried on
+          # the next schedule rather than failing the run.
+          curl -sS -f -H "Accept: application/json" "https://api.cfwidget.com/${PROJECT}" > project.json \
+            || { echo "CFWidget unavailable this run"; echo '{"files":[]}' > project.json; }
+          # Oldest first, so several approvals post in order.
+          jq --argjson last "$LAST" '[.files[] | select(.id > $last)] | sort_by(.id)' project.json > new.json
           COUNT=$(jq 'length' new.json)
           echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
           echo "${COUNT} newly approved file(s) since id ${LAST}"
@@ -62,34 +60,34 @@ jobs:
       - name: Announce on Discord
         if: ${{ steps.poll.outputs.count != '0' && steps.poll.outputs.seed == 'false' && secrets.DISCORD_WEBHOOK != '' }}
         env:
-          CF_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-          PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID }}
-          SLUG: ${{ vars.CURSEFORGE_SLUG }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         shell: bash
         run: |
           jq -c '.[]' new.json | while read -r file; do
             ID=$(jq -r '.id' <<<"$file")
-            NAME=$(jq -r '.displayName' <<<"$file")
-            FILENAME=$(jq -r '.fileName' <<<"$file")
-            TYPE=$(jq -r '.releaseType' <<<"$file")   # 1 release, 2 beta, 3 alpha
-            VERSIONS=$(jq -r '[.gameVersions[]] | join(" · ")' <<<"$file")
+            NAME=$(jq -r '.display' <<<"$file")
+            FILENAME=$(jq -r '.name' <<<"$file")
+            TYPE=$(jq -r '.type' <<<"$file")          # release, beta, alpha
+            PAGE=$(jq -r '.url' <<<"$file")
+            VERSIONS=$(jq -r '[.versions[]] | join(" · ")' <<<"$file")
             case "$TYPE" in
-              1) KIND="New release"; COLOR=5763719 ;;
-              2) KIND="New beta"; COLOR=15844367 ;;
-              *) KIND="New alpha"; COLOR=15548997 ;;
+              release) KIND="New release"; COLOR=5763719 ;;
+              beta)    KIND="New beta"; COLOR=15844367 ;;
+              *)       KIND="New alpha"; COLOR=15548997 ;;
             esac
-            PAGE="https://www.curseforge.com/minecraft/mc-mods/${SLUG}/files/${ID}"
-            # The changelog CurseForge shows for the file, as HTML; reduced to plain text.
-            curl -sS -f -H "x-api-key: ${CF_KEY}" -H "Accept: application/json" \
-              "https://api.curseforge.com/v1/mods/${PROJECT}/files/${ID}/changelog" \
-              | jq -r '.data' \
-              | sed -e 's#<br */\?>#\n#g' -e 's#</\(p\|li\|h[1-6]\)>#\n#g' -e 's#<li>#• #g' \
-                    -e 's#<[^>]*>##g' -e 's#&amp;#\&#g' -e 's#&lt;#<#g' -e 's#&gt;#>#g' -e 's#&quot;#"#g' \
-              | cat -s > notes.txt
+            # The mod version is what sits between the Minecraft version and "-all.jar" in the
+            # file name; its CHANGELOG.md section is the announcement body.
+            VERSION=$(sed -E 's/^ndidisplays-[0-9.]+-(.+)-all\.jar$/\1/; s/^ndidisplays-[0-9.]+-(.+)\.jar$/\1/' <<<"$FILENAME")
+            awk -v tag="${VERSION}" '
+              /^## \[/ { if (found) exit; if (index($0, "## [" tag "]") == 1) { found = 1; next } }
+              found { print }
+            ' CHANGELOG.md | cat -s > notes.txt
+            if [ ! -s notes.txt ]; then
+              echo "See the file page for details." > notes.txt
+            fi
             NOTES=$(head -c 3800 notes.txt)
             if [ "$(wc -c < notes.txt)" -gt 3800 ]; then
-              NOTES="${NOTES}"$'\n'"…full changelog on CurseForge."
+              NOTES="${NOTES}"$'\n'"…full notes on the file page."
             fi
             jq -n \
               --arg title "${KIND}: ${NAME} is live on CurseForge" \
@@ -105,7 +103,7 @@ jobs:
                   color: $color,
                   description: $notes,
                   fields: [{ name: $versions, value: $links }],
-                  footer: { text: "Passed CurseForge review. Needs the NDI runtime on each client for live video." }
+                  footer: { text: "Approved on CurseForge. Needs the NDI runtime on each client for live video." }
                 }]
               }' > payload.json
             curl -sS -f -H "Content-Type: application/json" -d @payload.json "${DISCORD_WEBHOOK}"
@@ -117,7 +115,7 @@ jobs:
         shell: bash
         run: |
           STATE=.github/curseforge-announced.json
-          jq '{lastFileId: (map(.id) | max), lastFileName: (sort_by(.id) | last | .displayName)}' new.json > "$STATE"
+          jq '{lastFileId: (map(.id) | max), lastFileName: (sort_by(.id) | last | .display)}' new.json > "$STATE"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$STATE"
