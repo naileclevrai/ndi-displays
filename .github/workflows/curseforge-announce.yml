@@ -28,6 +28,9 @@ jobs:
   poll:
     runs-on: ubuntu-latest
     if: ${{ vars.CURSEFORGE_PROJECT_ID != '' }}
+    env:
+      # Step conditions cannot read the secrets context; the job env can carry it down.
+      HAS_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +61,7 @@ jobs:
           echo "${COUNT} newly approved file(s) since id ${LAST}"
 
       - name: Announce on Discord
-        if: ${{ steps.poll.outputs.count != '0' && steps.poll.outputs.seed == 'false' && secrets.DISCORD_WEBHOOK != '' }}
+        if: ${{ steps.poll.outputs.count != '0' && steps.poll.outputs.seed == 'false' && env.HAS_WEBHOOK == 'true' }}
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         shell: bash
