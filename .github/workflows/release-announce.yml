@@ -1,0 +1,62 @@
+# Release pipeline: a pushed version tag (1.1.1-beta.1, 1.2.0, ...) builds the jar and publishes
+# a GitHub release carrying it and the matching CHANGELOG section. Tags with "beta", "rc" or
+# "alpha" in them are marked pre-release. The Discord announcement is not made here: it follows
+# CurseForge approval instead (curseforge-announce.yml), so the community hears about a build
+# only once it is actually downloadable there.
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      - name: Collect release facts
+        id: facts
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          JAR=$(ls build/libs/ndidisplays-*-"${TAG}"-all.jar | head -1)
+          echo "jar=${JAR}" >> "$GITHUB_OUTPUT"
+          echo "jar_name=$(basename "${JAR}")" >> "$GITHUB_OUTPUT"
+          # The tag's own section of CHANGELOG.md: from its heading to the next "## [" heading.
+          awk -v tag="${TAG}" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" tag "]") == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG.md section for ${TAG}." > release-notes.md
+          fi
+          if echo "${TAG}" | grep -qiE 'beta|rc|alpha'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "kind=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: NDI Stage Displays ${{ github.ref_name }}
+          body_path: release-notes.md
+          prerelease: ${{ steps.facts.outputs.prerelease }}
+          files: ${{ steps.facts.outputs.jar }}

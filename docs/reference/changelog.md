@@ -11,6 +11,7 @@ Current artifact: **`ndidisplays-1.20.1-1.1.1-beta.1-all.jar`** — Minecraft **
 
 - [Active Cam](/blocks/active-cam) (2D Spidercam): four [Camera Winches](/blocks/camera-winch), gondola, [controller](/blocks/active-cam-controller), FPV and drone-style waypoints.
 - [LED inner corner](/blocks/led-panel#90-turns) (`led_inner_corner`) — concave wrap for room corners.
+- Camera range slider (`cameraRange` / `cameraRangeUnlimited`) on the client options page.
 
 ## [1.1.1-beta.1] - 2026-09-06
 
@@ -28,6 +29,7 @@ Second CurseForge beta. Includes upstream `main` through `150b536`.
 - First person shows the whole shoulder rig. Monitor copy is opaque.
 - Blow-through is brighter against the bars; bloom uses the transparent MRT.
 - Palette strips are 16 px (full atlas mip chain).
+- Rack units are 12% wider and deeper, up to the slot pitch tall.
 - Creative tab icon is the NDI configuration card.
 
 ### Fixed

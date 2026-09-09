@@ -43,11 +43,11 @@ public class RackRenderer implements BlockEntityRenderer<RackBlockEntity> {
     }
 
     /** The web module's screen window, unit-local (from the mesh's screen_panel group). */
-    private static final float WEB_X0 = -0.1385F;
-    private static final float WEB_X1 = 0.3340F;
-    private static final float WEB_Y0 = 0.0253F;
-    private static final float WEB_Y1 = 0.1197F;
-    private static final float WEB_Z = 0.3538F + 0.004F;
+    private static final float WEB_X0 = -0.1551F;
+    private static final float WEB_X1 = 0.3741F;
+    private static final float WEB_Y0 = 0.0247F;
+    private static final float WEB_Y1 = 0.1168F;
+    private static final float WEB_Z = 0.3531F + 0.004F;
 
     @Override
     public void render(RackBlockEntity rack, float partialTick, PoseStack pose,

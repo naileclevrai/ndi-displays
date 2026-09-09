@@ -1,0 +1,97 @@
+# Announces a CurseForge file the moment it has passed review.
+#
+# CurseForge sends no notification when a file is approved, so this polls: every 15 minutes it
+# lists the project's files through CFWidget (api.cfwidget.com), a keyless public mirror of the
+# CurseForge API that only carries approved, publicly visible files. Any file newer than the last
+# one announced is posted to Discord with that version's section of CHANGELOG.md and its download
+# link. The high-water mark is committed back to the repo in .github/curseforge-announced.json so
+# the poller never announces a file twice.
+#
+# Repository settings this needs:
+#   secret   DISCORD_WEBHOOK         the channel webhook URL
+#   variable CURSEFORGE_PROJECT_ID   the numeric project id (shown on the project page, "About Project")
+#   variable DISCORD_ROLE_ID         optional; the role to ping (Server Settings > Roles > ... > Copy Role ID)
+name: CurseForge approval announce
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_post:
+        description: Post the newest file already on CurseForge as a test (the record is left alone)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: curseforge-announce
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    if: ${{ vars.CURSEFORGE_PROJECT_ID != '' }}
+    env:
+      # Step conditions cannot read the secrets context; the job env can carry it down.
+      HAS_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find newly approved files
+        id: poll
+        env:
+          PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          TEST_POST: ${{ inputs.test_post }}
+        shell: bash
+        run: |
+          STATE=.github/curseforge-announced.json
+          if [ "${TEST_POST}" = "true" ]; then
+            # A dry run of the announcement: the newest file, posted as if just approved.
+            echo "seed=false" >> "$GITHUB_OUTPUT"
+            curl -sS -f -H "Accept: application/json" "https://api.cfwidget.com/${PROJECT}" > project.json
+            jq '[.files | max_by(.id)]' project.json > new.json
+            echo "count=1" >> "$GITHUB_OUTPUT"
+            echo "test post of $(jq -r '.[0].display' new.json)"
+            exit 0
+          fi
+          if [ ! -f "$STATE" ]; then
+            # First run: everything already on CurseForge is old news. Seed the mark at the newest
+            # file and announce nothing; only files approved from now on are posted.
+            echo "seed=true" >> "$GITHUB_OUTPUT"
+            LAST=-1
+          else
+            echo "seed=false" >> "$GITHUB_OUTPUT"
+            LAST=$(jq -r '.lastFileId // 0' "$STATE")
+          fi
+          # CFWidget refreshes its copy of a project every few minutes; a miss here is retried on
+          # the next schedule rather than failing the run.
+          curl -sS -f -H "Accept: application/json" "https://api.cfwidget.com/${PROJECT}" > project.json \
+            || { echo "CFWidget unavailable this run"; echo '{"files":[]}' > project.json; }
+          # Oldest first, so several approvals post in order.
+          jq --argjson last "$LAST" '[.files[] | select(.id > $last)] | sort_by(.id)' project.json > new.json
+          COUNT=$(jq 'length' new.json)
+          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+          echo "${COUNT} newly approved file(s) since id ${LAST}"
+
+      - name: Announce on Discord
+        if: ${{ steps.poll.outputs.count != '0' && steps.poll.outputs.seed == 'false' && env.HAS_WEBHOOK == 'true' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          ROLE_ID: ${{ vars.DISCORD_ROLE_ID }}
+        shell: bash
+        run: python3 .github/scripts/announce_curseforge.py new.json project.json CHANGELOG.md
+
+      - name: Record the high-water mark
+        if: ${{ steps.poll.outputs.count != '0' && inputs.test_post != true }}
+        shell: bash
+        run: |
+          STATE=.github/curseforge-announced.json
+          jq '{lastFileId: (map(.id) | max), lastFileName: (sort_by(.id) | last | .display)}' new.json > "$STATE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$STATE"
+          git commit -m "CurseForge announce: $(jq -r '.lastFileName' "$STATE") posted"
+          git push

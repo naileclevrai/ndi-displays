@@ -74,7 +74,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class CameraFeedManager {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final double MAX_CAMERA_DISTANCE = 96.0;
+    /**
+     * Squared cutoff distance for cameras and drones, from the client config: past it a rig
+     * neither renders nor keeps its sender warm. Unlimited disables the cutoff entirely.
+     */
+    private static double cameraRangeSqr() {
+        if (dev.nano.ndidisplays.ClientConfig.CAMERA_RANGE_UNLIMITED.get()) {
+            return Double.MAX_VALUE;
+        }
+        double r = dev.nano.ndidisplays.ClientConfig.CAMERA_RANGE.get();
+        return r * r;
+    }
 
     /** -Dndidisplays.debugCapture=true logs each rig's real capture geometry once. */
     private static final boolean DEBUG_GEOMETRY =
@@ -811,7 +821,7 @@ public final class CameraFeedManager {
             }
             pollPtzControl(feed, now);
             if (be.getBlockPos().distToCenterSqr(player.position())
-                    <= MAX_CAMERA_DISTANCE * MAX_CAMERA_DISTANCE) {
+                    <= cameraRangeSqr()) {
                 ensureSender(feed, be.getEffectiveSourceName(), be.getKind() == CameraKind.PTZ,
                         be.getWidth(), be.getHeight(), be.getFps());
             }
@@ -841,7 +851,7 @@ public final class CameraFeedManager {
                 if (be.isRemoved() || !be.isActive()) {
                     continue;
                 }
-                if (be.getBlockPos().distToCenterSqr(player.position()) > MAX_CAMERA_DISTANCE * MAX_CAMERA_DISTANCE) {
+                if (be.getBlockPos().distToCenterSqr(player.position()) > cameraRangeSqr()) {
                     continue;
                 }
                 // The core of multi-camera performance: only rigs someone is subscribed to
@@ -1152,7 +1162,7 @@ public final class CameraFeedManager {
                 feed.closeSender();
                 continue;
             }
-            if (drone.distanceToSqr(player) > MAX_CAMERA_DISTANCE * MAX_CAMERA_DISTANCE) {
+            if (drone.distanceToSqr(player) > cameraRangeSqr()) {
                 continue;
             }
             double next = droneDueAt(feed);
@@ -1212,7 +1222,7 @@ public final class CameraFeedManager {
             double dx = pose.x - player.getX();
             double dy = pose.y - player.getY();
             double dz = pose.z - player.getZ();
-            if (dx * dx + dy * dy + dz * dz > MAX_CAMERA_DISTANCE * MAX_CAMERA_DISTANCE) {
+            if (dx * dx + dy * dy + dz * dz > cameraRangeSqr()) {
                 continue;
             }
             double next = activeCamDueAt(feed);

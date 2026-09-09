@@ -10,6 +10,10 @@ Values below are the **defaults** from `ClientConfig.java`.
 |-----|---------|---------|
 | `mode` | `AUTO` | `AUTO` — broadcast in singleplayer / LAN host only. `ALWAYS` — operator machine on a dedicated server. `NEVER` — receive only. |
 | `handheld` | `true` | Publish `MC Handheld <player>` while the item is held. Several players can each carry one. |
+| `cameraRange` | `96` | Blocks from the player beyond which a camera stops sending. Its NDI source goes idle and resumes when you come back. Cameras only see what your render distance has loaded. |
+| `cameraRangeUnlimited` | `false` | Ignore `cameraRange`; every active camera in the loaded world keeps sending. |
+
+Both range settings are also on the mod's options page: Mods, NDI Stage Displays, Config.
 
 See [Multiplayer](/guide/multiplayer).
 
