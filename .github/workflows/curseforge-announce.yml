@@ -10,6 +10,7 @@
 # Repository settings this needs:
 #   secret   DISCORD_WEBHOOK         the channel webhook URL
 #   variable CURSEFORGE_PROJECT_ID   the numeric project id (shown on the project page, "About Project")
+#   variable DISCORD_ROLE_ID         optional; the role to ping (Server Settings > Roles > ... > Copy Role ID)
 name: CurseForge approval announce
 
 on:
@@ -79,54 +80,9 @@ jobs:
         if: ${{ steps.poll.outputs.count != '0' && steps.poll.outputs.seed == 'false' && env.HAS_WEBHOOK == 'true' }}
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          ROLE_ID: ${{ vars.DISCORD_ROLE_ID }}
         shell: bash
-        run: |
-          jq -c '.[]' new.json | while read -r file; do
-            ID=$(jq -r '.id' <<<"$file")
-            NAME=$(jq -r '.display' <<<"$file")
-            FILENAME=$(jq -r '.name' <<<"$file")
-            TYPE=$(jq -r '.type' <<<"$file")          # release, beta, alpha
-            PAGE=$(jq -r '.url' <<<"$file")
-            VERSIONS=$(jq -r '[.versions[]] | join(" · ")' <<<"$file")
-            case "$TYPE" in
-              release) KIND="New release"; COLOR=5763719 ;;
-              beta)    KIND="New beta"; COLOR=15844367 ;;
-              *)       KIND="New alpha"; COLOR=15548997 ;;
-            esac
-            # The mod version is what sits between the Minecraft version and "-all.jar" in the
-            # file name; its CHANGELOG.md section is the announcement body.
-            VERSION=$(sed -E 's/^ndidisplays-[0-9.]+-(.+)-all\.jar$/\1/; s/^ndidisplays-[0-9.]+-(.+)\.jar$/\1/' <<<"$FILENAME")
-            awk -v tag="${VERSION}" '
-              /^## \[/ { if (found) exit; if (index($0, "## [" tag "]") == 1) { found = 1; next } }
-              found { print }
-            ' CHANGELOG.md | cat -s > notes.txt
-            if [ ! -s notes.txt ]; then
-              echo "See the file page for details." > notes.txt
-            fi
-            NOTES=$(head -c 3800 notes.txt)
-            if [ "$(wc -c < notes.txt)" -gt 3800 ]; then
-              NOTES="${NOTES}"$'\n'"…full notes on the file page."
-            fi
-            jq -n \
-              --arg title "${KIND}: ${NAME} is live on CurseForge" \
-              --arg url "$PAGE" \
-              --arg notes "$NOTES" \
-              --arg links "[Download ${FILENAME}](${PAGE})" \
-              --arg versions "$VERSIONS" \
-              --argjson color "$COLOR" \
-              '{
-                embeds: [{
-                  title: $title,
-                  url: $url,
-                  color: $color,
-                  description: $notes,
-                  fields: [{ name: $versions, value: $links }],
-                  footer: { text: "Approved on CurseForge. Needs the NDI runtime on each client for live video." }
-                }]
-              }' > payload.json
-            curl -sS -f -H "Content-Type: application/json" -d @payload.json "${DISCORD_WEBHOOK}"
-            echo "announced ${NAME} (${ID})"
-          done
+        run: python3 .github/scripts/announce_curseforge.py new.json project.json CHANGELOG.md
 
       - name: Record the high-water mark
         if: ${{ steps.poll.outputs.count != '0' && inputs.test_post != true }}
