@@ -1,0 +1,109 @@
+# Release pipeline: a pushed version tag (1.1.1-beta.1, 1.2.0, ...) builds the jar, publishes a
+# GitHub release carrying it and the matching CHANGELOG section, then posts that section to the
+# Discord webhook in the DISCORD_WEBHOOK secret. Tags with "beta" or "rc" in them are announced
+# as betas and marked pre-release; anything else is a full release.
+#
+# Repository settings this needs:
+#   secret  DISCORD_WEBHOOK   the channel webhook URL (Channel settings > Integrations > Webhooks)
+#   variable CURSEFORGE_URL   optional; the project page, linked in the announcement when set
+name: Release and announce
+
+on:
+  push:
+    tags:
+      - '[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      - name: Collect release facts
+        id: facts
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          JAR=$(ls build/libs/ndidisplays-*-"${TAG}"-all.jar | head -1)
+          echo "jar=${JAR}" >> "$GITHUB_OUTPUT"
+          echo "jar_name=$(basename "${JAR}")" >> "$GITHUB_OUTPUT"
+          # The tag's own section of CHANGELOG.md: from its heading to the next "## [" heading.
+          awk -v tag="${TAG}" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" tag "]") == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG.md section for ${TAG}." > release-notes.md
+          fi
+          if echo "${TAG}" | grep -qiE 'beta|rc|alpha'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "kind=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: NDI Stage Displays ${{ github.ref_name }}
+          body_path: release-notes.md
+          prerelease: ${{ steps.facts.outputs.prerelease }}
+          files: ${{ steps.facts.outputs.jar }}
+
+      - name: Announce on Discord
+        if: ${{ secrets.DISCORD_WEBHOOK != '' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          CURSEFORGE_URL: ${{ vars.CURSEFORGE_URL }}
+          TAG: ${{ github.ref_name }}
+          KIND: ${{ steps.facts.outputs.kind }}
+          JAR_NAME: ${{ steps.facts.outputs.jar_name }}
+        shell: bash
+        run: |
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          JAR_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${JAR_NAME}"
+          if [ "${KIND}" = "beta" ]; then
+            TITLE="New beta: NDI Stage Displays ${TAG}"; COLOR=15844367
+          else
+            TITLE="New release: NDI Stage Displays ${TAG}"; COLOR=5763719
+          fi
+          # Discord caps an embed description at 4096 characters.
+          NOTES=$(head -c 3800 release-notes.md)
+          if [ "$(wc -c < release-notes.md)" -gt 3800 ]; then
+            NOTES="${NOTES}"$'\n'"…full notes on the release page."
+          fi
+          LINKS="[Download ${JAR_NAME}](${JAR_URL}) · [Release notes](${RELEASE_URL})"
+          if [ -n "${CURSEFORGE_URL}" ]; then
+            LINKS="${LINKS} · [CurseForge](${CURSEFORGE_URL})"
+          fi
+          jq -n \
+            --arg title "$TITLE" \
+            --arg url "$RELEASE_URL" \
+            --arg notes "$NOTES" \
+            --arg links "$LINKS" \
+            --argjson color "$COLOR" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                color: $color,
+                description: $notes,
+                fields: [{ name: "Minecraft 1.20.1 · Forge 47 · Java 17", value: $links }],
+                footer: { text: "Needs the NDI runtime on each client for live video." }
+              }]
+            }' > payload.json
+          curl -sS -f -H "Content-Type: application/json" -d @payload.json "${DISCORD_WEBHOOK}"
