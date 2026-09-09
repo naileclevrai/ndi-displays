@@ -16,6 +16,11 @@ on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
+    inputs:
+      test_post:
+        description: Post the newest file already on CurseForge as a test (the record is left alone)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -38,9 +43,19 @@ jobs:
         id: poll
         env:
           PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          TEST_POST: ${{ inputs.test_post }}
         shell: bash
         run: |
           STATE=.github/curseforge-announced.json
+          if [ "${TEST_POST}" = "true" ]; then
+            # A dry run of the announcement: the newest file, posted as if just approved.
+            echo "seed=false" >> "$GITHUB_OUTPUT"
+            curl -sS -f -H "Accept: application/json" "https://api.cfwidget.com/${PROJECT}" > project.json
+            jq '[.files | max_by(.id)]' project.json > new.json
+            echo "count=1" >> "$GITHUB_OUTPUT"
+            echo "test post of $(jq -r '.[0].display' new.json)"
+            exit 0
+          fi
           if [ ! -f "$STATE" ]; then
             # First run: everything already on CurseForge is old news. Seed the mark at the newest
             # file and announce nothing; only files approved from now on are posted.
@@ -114,7 +129,7 @@ jobs:
           done
 
       - name: Record the high-water mark
-        if: ${{ steps.poll.outputs.count != '0' }}
+        if: ${{ steps.poll.outputs.count != '0' && inputs.test_post != true }}
         shell: bash
         run: |
           STATE=.github/curseforge-announced.json
