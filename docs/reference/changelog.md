@@ -9,6 +9,7 @@ Current artifact: **`ndidisplays-1.20.1-1.1.1-beta.1-all.jar`** — Minecraft **
 
 ### Added
 
+- [Active Cam](/blocks/active-cam) (2D Spidercam): four [Camera Winches](/blocks/camera-winch), gondola, [controller](/blocks/active-cam-controller), FPV and drone-style waypoints.
 - [LED inner corner](/blocks/led-panel#90-turns) (`led_inner_corner`) — concave wrap for room corners.
 
 ## [1.1.1-beta.1] - 2026-09-06
