@@ -54,7 +54,8 @@ public class WorklightRenderer implements BlockEntityRenderer<WorklightBlockEnti
     private static final float WARM_G = 0.93F;
     private static final float WARM_B = 0.78F;
 
-    private static final float BEAM_LENGTH = 14.0F;
+    private static final float BEAM_LENGTH = 12.0F;
+    private static final float FLOOD_HALF_ANGLE_DEG = 48.0F;
 
     private static final Set<String> YOKE = Set.of(
             "yoke_top", "yoke_arm_l", "yoke_arm_r", "pivot_0", "pivot_1",
@@ -165,9 +166,10 @@ public class WorklightRenderer implements BlockEntityRenderer<WorklightBlockEnti
         Matrix4f head = new Matrix4f(local.last().pose());
 
         if (TheatricalCompat.LOADED) {
-            // focus 1 opens the cone to the widest half-angle the bridge offers: a flood.
-            TheatricalCompat.submitFixtureBeam(pos, head, 0.16F * SCALE, 1.0F,
-                    WARM_R, WARM_G, WARM_B, 1.0F, BEAM_LENGTH);
+            // A halogen flood spreads about 50 degrees either side; volumetric only, the
+            // classic flat cone would read as a beige sheet on the floor.
+            TheatricalCompat.submitVolumetricFlood(pos, head, 0.16F * SCALE, FLOOD_HALF_ANGLE_DEG,
+                    WARM_R, WARM_G, WARM_B, 0.85F, BEAM_LENGTH);
         }
 
         if (LedWallRenderer.SHIMMER_LOADED) {
