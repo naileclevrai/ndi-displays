@@ -92,6 +92,10 @@ floor canvas — colour bars, grids, or live video underfoot.
 A single mount that draws a video disc of configurable radius. Same processor
 workflow as the walls, without building a circle out of cabinets.
 
+### Spherical LED Screen
+A single mount that draws a video globe of configurable diameter (0.5–32 m).
+The frame wraps round it as an equirectangular map — feed it a 2:1 panorama.
+
 </td>
 </tr>
 <tr>
@@ -128,7 +132,7 @@ alignment grid. Shadows use a 2048 map.
 
 ### LED Corner
 Quarter-cylinder wrap between two cardinal runs. Craft from one panel.
-Sneak-place for the inner corner. Without it, a 90° L is two walls.
+Sneak-place for the inner corner. Without one, two flats touching at a convex 90° corner still merge, as a hard fold.
 
 </td>
 </tr>
@@ -173,7 +177,10 @@ place on the ground. Clicking a block face still snaps flush to that face.
 
 Build a 45° wall as a staircase — one block diagonally each time — and the
 cabinets meet corner to corner. A straight run and a 45° wing are **two**
-walls with their own sources, meeting at a corner.
+walls with their own sources, meeting at a corner — unless a chamfer bridges
+them. Set the chamfer diagonally off the flat cabinet's rear corner (flat
+cabinets sit at the back of their block) and the run, the chamfer and the run
+beyond become **one** screen; a closed ring of flats and chamfers is one wall.
 
 </details>
 
@@ -594,7 +601,7 @@ Two jars land in `build/libs/`:
 <td width="50%" valign="top">
 
 **Ship this**
-`ndidisplays-1.20.1-1.1.1-beta.1-all.jar`
+`ndidisplays-1.20.1-1.1.3-all.jar`
 
 Devolay is bundled via jarJar.
 
@@ -602,7 +609,7 @@ Devolay is bundled via jarJar.
 <td width="50%" valign="top">
 
 **Do not ship**
-`ndidisplays-1.20.1-1.1.1-beta.1.jar`
+`ndidisplays-1.20.1-1.1.3.jar`
 
 No NDI bindings. Devolay will fail at runtime.
 

@@ -2,7 +2,7 @@
 
 Minecraft **1.20.1**, **Forge 47.x**, Java 17. Put the **`-all`** jar on every **client that should see video** and on the **server** (blocks must be registered). The server never opens NDI.
 
-Ship **`ndidisplays-1.20.1-1.1.1-beta.1-all.jar`**. The thin jar without `-all` has no Devolay bindings and will fail at runtime.
+Ship **`ndidisplays-1.20.1-1.1.3-all.jar`**. The thin jar without `-all` has no Devolay bindings and will fail at runtime.
 
 Without an NDI library the mod still loads. Walls show test patterns and the GUI reports that NDI is missing.
 
@@ -30,7 +30,7 @@ The **[NDI SDK](https://ndi.video/for-developers/ndi-sdk/)** is for native devel
 
 ## macOS
 
-Install [NDI Tools](https://ndi.video/tools/) (includes the runtime). Linux notes below do not apply.
+Install the [NDI Redist for Apple](http://ndi.link/NDIRedistV6Apple), which puts `libndi.dylib` under `/usr/local/lib` where the mod looks for it. Intel and Apple Silicon Macs are both supported: the jar carries its own arm64 build of the NDI binding. Linux notes below do not apply.
 
 ## Linux
 

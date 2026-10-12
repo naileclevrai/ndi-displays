@@ -62,10 +62,12 @@ public class CurvedScreenRenderer implements BlockEntityRenderer<CurvedScreenBlo
         Direction facing = be.getFacing();
         Vec3 fwd = Vec3.atLowerCornerOf(facing.getNormal());
         Vec3 right = Vec3.atLowerCornerOf(facing.getClockWise().getNormal());
-        Vec3 center = new Vec3(0.5, 0.5, 0.5);
+        // The arc's centre sits `offset` metres in front of the mount along its facing.
+        Vec3 center = new Vec3(0.5, 0.5, 0.5).add(fwd.scale(be.getOffset()));
 
-        float yBottom = (float) (0.5 - h * 0.5);
-        float yTop = (float) (0.5 + h * 0.5);
+        float yMid = 0.5F + be.getYOffset();
+        float yBottom = yMid - h * 0.5F;
+        float yTop = yMid + h * 0.5F;
 
         // Radial positions of the LED face and the cabinet back. Concave = video on the
         // inner face, cabinet radially outwards; convex = the opposite.
@@ -306,6 +308,8 @@ public class CurvedScreenRenderer implements BlockEntityRenderer<CurvedScreenBlo
 
     @Override
     public int getViewDistance() {
-        return 256;
+        // The arc can reach 256 m from its hub, so the hub may be far outside the default
+        // block-entity cutoff while the video face is right in front of the player.
+        return 1024;
     }
 }

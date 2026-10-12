@@ -1,0 +1,151 @@
+# Builds Devolay's native library for macOS on Apple Silicon and repacks the stock Devolay jar
+# with it, so the mod's NDI binding works on M-series Macs.
+#
+# Upstream Devolay 2.1.x ships macOS natives for x86-64 only; on an arm64 Java runtime the loader
+# looks for natives/macos/arm64-v8a/libdevolay-natives.dylib inside the Devolay jar and gives up.
+# This runs on an Apple Silicon runner: it takes Devolay's C++ sources at the pinned tag, the NDI
+# SDK for Apple headers, and the JNI headers javac generates from Devolay's own Java classes,
+# compiles them with clang for arm64, ad-hoc signs the result (unsigned arm64 code is refused by
+# macOS), and adds it to a copy of devolay-2.1.0.jar from Maven Central. The repacked jar is
+# committed to thirdparty/ where build.gradle picks it up through a flat-dir repository.
+#
+# Runs whenever this file changes on main, or by hand from the Actions tab.
+name: Build Devolay macOS arm64
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/build-devolay-arm64.yml']
+  workflow_dispatch:
+    inputs:
+      devolay_tag:
+        description: Devolay git tag to build
+        default: v2.1.0
+      commit:
+        description: Commit the repacked jar to thirdparty/ on this branch
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    env:
+      # Pushes carry no inputs; these are the dispatch defaults.
+      DEVOLAY_TAG: ${{ inputs.devolay_tag || 'v2.1.0' }}
+      DO_COMMIT: ${{ github.event_name == 'push' || inputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          architecture: aarch64
+
+      - name: Fetch Devolay sources
+        run: git clone --depth 1 -b "${DEVOLAY_TAG}" https://github.com/WalkerKnapp/devolay.git devolay
+
+      - name: Install the NDI SDK for Apple (headers)
+        # SDK 5, not 6: Devolay 2.1.0 passes instance handles as void pointers, which SDK 6's
+        # typed handles reject at compile time. The runtime ABI is the same, so the result
+        # still loads the v6 runtime the Apple redistributable installs.
+        run: |
+          curl -sSL -o ndi-sdk.pkg "https://downloads.ndi.tv/SDK/NDI_SDK_Mac/Install_NDI_SDK_v5_Apple.pkg"
+          sudo installer -pkg ndi-sdk.pkg -target /
+          INC=$(dirname "$(find /Library -name Processing.NDI.Lib.h -print -quit)")
+          echo "NDI headers: $INC"; ls "$INC" | head
+          echo "NDI_INCLUDE=$INC" >> "$GITHUB_ENV"
+
+      - name: Generate JNI headers from Devolay's Java classes
+        run: |
+          mkdir -p devolay/devolay-natives/src/main/headers gen/classes
+          javac -h devolay/devolay-natives/src/main/headers -d gen/classes \
+            $(find devolay/devolay-java/src/main/java -name '*.java')
+          ls devolay/devolay-natives/src/main/headers
+
+      - name: Patch Devolay's handle casts for SDK 5 headers
+        # Devolay 2.1.0 predates SDK 5's typed handles: it casts a jlong to
+        # NDIlib_x_instance_t * (a pointer to the handle) where the API takes the handle itself.
+        # Under SDK 4's void* handles that converted silently; now it is a type error. Rewrite
+        # the casts to the handle type, which is the form the rest of the file already uses, and
+        # route the sender's metadata free through send_free_metadata rather than the receiver's.
+        run: |
+          cd devolay/devolay-natives/src/main/cpp
+          sed -i '' -E '/getNDILib\(\)/ s/reinterpret_cast<(NDIlib_[a-z]+_instance_t) \*>/reinterpret_cast<\1>/g' *.cpp
+          sed -i '' 's/getNDILib()->recv_free_metadata(reinterpret_cast<NDIlib_send_instance_t>/getNDILib()->send_free_metadata(reinterpret_cast<NDIlib_send_instance_t>/' sender.cpp
+          echo "remaining pointer-to-handle casts on API calls:"; grep -n 'getNDILib().*instance_t \*' *.cpp || echo none
+
+      - name: Compile the arm64 native
+        # Everything goes through one log that is committed whatever happens: job logs need a
+        # login to read through the API, a file in the repo does not.
+        shell: bash {0}
+        run: |
+          set +e
+          LOG="$GITHUB_WORKSPACE/arm64-build.log"
+          {
+            set -x
+            mkdir -p deps
+            curl -sSL -o deps/filesystem.hpp https://github.com/gulrak/filesystem/releases/download/v1.3.2/filesystem.hpp
+            ls -la deps
+            echo "JAVA_HOME=$JAVA_HOME"; ls "$JAVA_HOME/include" "$JAVA_HOME/include/darwin"
+            ls "$NDI_INCLUDE"
+            ls devolay/devolay-natives/src/main/headers
+            cd devolay/devolay-natives/src/main/cpp
+            clang++ -std=c++11 -O2 -fPIC -dynamiclib -arch arm64 -mmacosx-version-min=11.0 \
+              -I. -I../headers -I"$GITHUB_WORKSPACE/deps" \
+              -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/darwin" \
+              -I"$NDI_INCLUDE" \
+              -o "$GITHUB_WORKSPACE/libdevolay-natives.dylib" *.cpp -ldl
+            STATUS=$?
+            cd "$GITHUB_WORKSPACE"
+            if [ "$STATUS" = "0" ]; then
+              codesign --force -s - libdevolay-natives.dylib
+              file libdevolay-natives.dylib
+              nm -gU libdevolay-natives.dylib | grep -c Java_me_walkerknapp
+              codesign -dv libdevolay-natives.dylib 2>&1 | head -3
+            fi
+            echo "COMPILE_STATUS=$STATUS"
+          } > "$LOG" 2>&1
+          cat "$LOG"
+          STATUS=$(sed -n 's/^COMPILE_STATUS=//p' "$LOG" | tail -1)
+          mkdir -p thirdparty
+          cp "$LOG" thirdparty/arm64-build.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add thirdparty/arm64-build.txt
+          git commit -q -m "Devolay arm64 build log (status ${STATUS:-unknown})" && git push
+          test "$STATUS" = "0"
+
+      - name: Repack the Devolay jar with the arm64 native
+        run: |
+          VERSION="${DEVOLAY_TAG#v}"
+          curl -sSL -o devolay-upstream.jar "https://repo1.maven.org/maven2/me/walkerknapp/devolay/${VERSION}/devolay-${VERSION}.jar"
+          mkdir -p repack/natives/macos/arm64-v8a
+          cp devolay-upstream.jar repack/devolay.jar
+          cp libdevolay-natives.dylib repack/natives/macos/arm64-v8a/
+          (cd repack && zip -q devolay.jar natives/macos/arm64-v8a/libdevolay-natives.dylib)
+          mkdir -p thirdparty
+          # Version ".1" above upstream so it still satisfies the [2.1.0,3.0) range Gradle pins.
+          cp repack/devolay.jar "thirdparty/devolay-${VERSION}.1.jar"
+          unzip -l "thirdparty/devolay-${VERSION}.1.jar" | grep natives/
+          echo "jar=thirdparty/devolay-${VERSION}.1.jar" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: devolay-macos-arm64
+          path: |
+            libdevolay-natives.dylib
+            thirdparty/*.jar
+
+      - name: Commit the repacked jar
+        if: ${{ env.DO_COMMIT == 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -q --ignore-unmatch thirdparty/arm64-build.txt
+          git add thirdparty/
+          git commit -m "Devolay ${DEVOLAY_TAG} repacked with a macOS arm64 native" || echo "nothing to commit"
+          git push

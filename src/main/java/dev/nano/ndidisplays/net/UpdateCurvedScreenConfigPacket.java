@@ -16,8 +16,8 @@ import java.util.function.Supplier;
  */
 public record UpdateCurvedScreenConfigPacket(BlockPos pos, String source, int pxPerBlock,
                                              float brightness, int pattern, float radius,
-                                             float arcAngle, float screenHeight, boolean convex,
-                                             int videoRepeat) {
+                                             float arcAngle, float screenHeight, float offset, float yOffset, boolean convex,
+                                             int videoRepeat, boolean hideMount) {
 
     public static void encode(UpdateCurvedScreenConfigPacket msg, FriendlyByteBuf buf) {
         buf.writeBlockPos(msg.pos);
@@ -28,8 +28,11 @@ public record UpdateCurvedScreenConfigPacket(BlockPos pos, String source, int px
         buf.writeFloat(msg.radius);
         buf.writeFloat(msg.arcAngle);
         buf.writeFloat(msg.screenHeight);
+        buf.writeFloat(msg.offset);
+        buf.writeFloat(msg.yOffset);
         buf.writeBoolean(msg.convex);
         buf.writeVarInt(msg.videoRepeat);
+        buf.writeBoolean(msg.hideMount);
     }
 
     public static UpdateCurvedScreenConfigPacket decode(FriendlyByteBuf buf) {
@@ -42,8 +45,11 @@ public record UpdateCurvedScreenConfigPacket(BlockPos pos, String source, int px
                 buf.readFloat(),
                 buf.readFloat(),
                 buf.readFloat(),
+                buf.readFloat(),
+                buf.readFloat(),
                 buf.readBoolean(),
-                buf.readVarInt());
+                buf.readVarInt(),
+                buf.readBoolean());
     }
 
     public static void handle(UpdateCurvedScreenConfigPacket msg, Supplier<NetworkEvent.Context> ctx) {
@@ -60,8 +66,14 @@ public record UpdateCurvedScreenConfigPacket(BlockPos pos, String source, int px
                 return;
             }
             screen.applyConfig(msg.source, msg.pxPerBlock, msg.brightness, msg.pattern,
-                    msg.radius, msg.arcAngle, msg.screenHeight, msg.convex, msg.videoRepeat);
+                    msg.radius, msg.arcAngle, msg.screenHeight, msg.offset, msg.yOffset, msg.convex, msg.videoRepeat);
             BlockState state = level.getBlockState(msg.pos);
+            if (state.hasProperty(dev.nano.ndidisplays.block.CurvedScreenBlock.HIDDEN)
+                    && state.getValue(dev.nano.ndidisplays.block.CurvedScreenBlock.HIDDEN) != msg.hideMount) {
+                // Same block, new state: the block entity survives the swap.
+                state = state.setValue(dev.nano.ndidisplays.block.CurvedScreenBlock.HIDDEN, msg.hideMount);
+                level.setBlock(msg.pos, state, 3);
+            }
             level.sendBlockUpdated(msg.pos, state, state, 3);
         });
         ctx.get().setPacketHandled(true);

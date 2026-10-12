@@ -623,6 +623,7 @@ public final class CameraFeedManager {
     @SubscribeEvent
     public static void onRenderStage(net.minecraftforge.client.event.RenderLevelStageEvent event) {
         if (!capturing) {
+            healPlayerFrame(event);
             return;
         }
         // Keep the nested render inside its own framebuffer. Post-processing mods hook these same
@@ -663,6 +664,52 @@ public final class CameraFeedManager {
         LOGGER.info("[ndidisplays] stage {} viewport {},{} {}x{} boundDrawFbo={}",
                 event.getStage(), vp[0], vp[1], vp[2], vp[3],
                 GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING));
+    }
+
+    private static final java.util.Set<String> HEALED_STAGES = new java.util.HashSet<>();
+
+    /**
+     * The player's own frame, guarded the same way captures are.
+     *
+     * Post-processing mods size their scratch targets to "main", and during a capture main IS the
+     * camera's 1920x1080 buffer. Back in the player's frame those targets are still capture-sized;
+     * a mod that binds one at a stage checkpoint and then rebinds main WITHOUT resetting the
+     * viewport leaves the GL viewport at capture size for everything drawn afterwards. Terrain
+     * and entities are already down by then and look right, but the hand, and lights other mods
+     * draw late (Theatrical's fixture glows), land displaced and scaled by the window/capture size
+     * ratio — invisible on a 1080p window, obvious on a small one. Vanilla never resets the
+     * viewport between stages because nothing in vanilla changes it. This does: whenever the
+     * viewport or the draw framebuffer differs from the real main target at a checkpoint, both
+     * are put back. Skipped under a shader pack, which owns its own framebuffers mid-frame.
+     */
+    private static void healPlayerFrame(net.minecraftforge.client.event.RenderLevelStageEvent event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null
+                || dev.nano.ndidisplays.client.render.ShaderPackCompat.shaderPackActive()) {
+            return;
+        }
+        RenderTarget main = mc.getMainRenderTarget();
+        if (main == null) {
+            return;
+        }
+        int[] vp = new int[4];
+        GL11C.glGetIntegerv(GL11C.GL_VIEWPORT, vp);
+        boolean fboWrong = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING) != main.frameBufferId;
+        boolean viewportWrong = vp[0] != 0 || vp[1] != 0 || vp[2] != main.width || vp[3] != main.height;
+        if (!fboWrong && !viewportWrong) {
+            return;
+        }
+        if (HEALED_STAGES.size() < 8 && HEALED_STAGES.add(String.valueOf(event.getStage()))) {
+            LOGGER.info("[ndidisplays] player frame left with {} at stage {} (viewport {}x{},"
+                            + " main {}x{}); restoring the main target",
+                    fboWrong ? "a foreign framebuffer" : "a foreign viewport", event.getStage(),
+                    vp[2], vp[3], main.width, main.height);
+        }
+        if (fboWrong) {
+            main.bindWrite(true);
+        } else {
+            RenderSystem.viewport(0, 0, main.width, main.height);
+        }
     }
 
     /**
@@ -983,7 +1030,33 @@ public final class CameraFeedManager {
         return dev.nano.ndidisplays.client.ndi.NdiHost.shouldBroadcastHandheld()
                 && (player.getMainHandItem().is(NdiDisplays.HANDHELD_CAMERA_ITEM.get())
                     || player.getOffhandItem().is(NdiDisplays.HANDHELD_CAMERA_ITEM.get())
-                    || wearingShoulderRig(player));
+                    || (wearingShoulderRig(player)
+                        && dev.nano.ndidisplays.item.ShoulderCameraItem.live(wornRig(player))));
+    }
+
+    private static net.minecraft.world.item.ItemStack wornRig(LocalPlayer player) {
+        return player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.CHEST);
+    }
+
+    // The shoulder rig carries its own feed settings on the stack, like a block camera's config;
+    // the handheld keeps the fixed defaults.
+
+    private static int operatorFps(LocalPlayer player) {
+        return wearingShoulderRig(player)
+                ? dev.nano.ndidisplays.item.ShoulderCameraItem.fps(wornRig(player))
+                : HANDHELD_FPS;
+    }
+
+    private static int operatorWidth(LocalPlayer player) {
+        return wearingShoulderRig(player)
+                ? dev.nano.ndidisplays.item.ShoulderCameraItem.width(wornRig(player))
+                : HANDHELD_WIDTH;
+    }
+
+    private static int operatorHeight(LocalPlayer player) {
+        return wearingShoulderRig(player)
+                ? dev.nano.ndidisplays.item.ShoulderCameraItem.height(wornRig(player))
+                : HANDHELD_HEIGHT;
     }
 
     /**
@@ -1003,7 +1076,11 @@ public final class CameraFeedManager {
      */
     private static String operatorFeedName(LocalPlayer player) {
         String who = player.getGameProfile().getName();
-        return (wearingShoulderRig(player) ? "MC Shoulder " : "MC Handheld ") + who;
+        if (wearingShoulderRig(player)) {
+            String custom = dev.nano.ndidisplays.item.ShoulderCameraItem.source(wornRig(player)).trim();
+            return custom.isEmpty() ? "MC Shoulder " + who : custom;
+        }
+        return "MC Handheld " + who;
     }
 
     /**
@@ -1067,7 +1144,7 @@ public final class CameraFeedManager {
         if (now < handheldDue) {
             return;
         }
-        handheldDue = now + 1.0 / HANDHELD_FPS;
+        handheldDue = now + 1.0 / operatorFps(player);
         if (handheldFeed == null) {
             handheldFeed = new Feed(null);
         }
@@ -1076,7 +1153,7 @@ public final class CameraFeedManager {
             RenderTarget main = mc.getMainRenderTarget();
             captureTarget = main;
             readAndSend(handheldFeed, operatorFeedName(player),
-                    HANDHELD_FPS, false, main.viewWidth, main.viewHeight);
+                    operatorFps(player), false, main.viewWidth, main.viewHeight);
         } catch (Throwable t) {
             LOGGER.warn("[ndidisplays] handheld screen copy failed: {}", t.toString());
             handheldDue = now + 2.0;
@@ -1096,13 +1173,13 @@ public final class CameraFeedManager {
         if (now < handheldDue) {
             return false;
         }
-        handheldDue = now + 1.0 / HANDHELD_FPS;
+        handheldDue = now + 1.0 / operatorFps(player);
         if (handheldFeed == null) {
             handheldFeed = new Feed(null);
         }
         try {
             completePendingReadback(handheldFeed);
-            captureTarget = acquireCaptureTarget(HANDHELD_WIDTH, HANDHELD_HEIGHT);
+            captureTarget = acquireCaptureTarget(operatorWidth(player), operatorHeight(player));
             // Operator wobble: two incommensurate sines per axis so it never loops visibly.
             float wobbleYaw = (float) (Math.sin(now * 1.7) * 0.5 + Math.sin(now * 4.3) * 0.2);
             float wobblePitch = (float) (Math.sin(now * 2.1 + 1.0) * 0.4 + Math.sin(now * 5.7) * 0.15);
@@ -1133,7 +1210,7 @@ public final class CameraFeedManager {
                 keepShoulderFrame(captureTarget);
             }
             readAndSend(handheldFeed, operatorFeedName(player),
-                    HANDHELD_FPS, false, captureTarget.viewWidth, captureTarget.viewHeight);
+                    operatorFps(player), false, captureTarget.viewWidth, captureTarget.viewHeight);
         } catch (Throwable t) {
             LOGGER.warn("[ndidisplays] handheld capture failed: {}", t.toString());
             handheldDue = now + 2.0; // back off, then retry
@@ -1827,8 +1904,12 @@ public final class CameraFeedManager {
         com.mojang.blaze3d.platform.GlStateManager._clear(
                 org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT, Minecraft.ON_OSX);
         com.mojang.blaze3d.platform.GlStateManager._colorMask(true, true, true, true);
-        com.mojang.blaze3d.platform.GlStateManager._glBindFramebuffer(
-                org.lwjgl.opengl.GL30.GL_FRAMEBUFFER, src.frameBufferId);
+        // Back to the screen, not to the capture. This runs after renderView has already restored
+        // main, so leaving the capture bound here sent the player's whole next frame (sky pass
+        // onwards) into the camera's buffer: no sky clear on screen, old frames smearing into
+        // streaks, and world pixels painted over the pause menu. readAndSend binds its own read
+        // framebuffer, so nothing after this needs the capture bound.
+        Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
         shoulderCaptureTex = shoulderMonitor.getColorTextureId();
         shoulderCaptureW = w;
         shoulderCaptureH = h;
@@ -2320,6 +2401,15 @@ public final class CameraFeedManager {
         cameraEntity.setXRot(view.pitch());
         cameraEntity.xRotO = view.pitch();
 
+        // Everything from here on mutates shared render state, so it all sits inside the one
+        // try whose finally puts that state back. The setup used to run ahead of the try, and a
+        // failure in it (a compat hook throwing on a client without that mod) left the game
+        // rendering into the camera's buffer at the camera's size — for good.
+        boolean[] shimmerSaved = null;
+        Object bloomSaved = null;
+        Boolean bloomFlag = null;
+        java.util.List<Object> beamsSaved = null;
+        try {
         mc.renderBuffers().bufferSource().endBatch();
         mc.gameRenderer.setRenderBlockOutline(false);
         mc.gameRenderer.setRenderHand(false);
@@ -2395,7 +2485,10 @@ public final class CameraFeedManager {
         mc.mainRenderTarget = captureTarget;
         // Shimmer's post passes composite against the real screen framebuffer;
         // inside a capture they would paste the player's HUD frame into the feed.
-        boolean[] shimmerSaved = dev.nano.ndidisplays.client.render.LedWallRenderer.SHIMMER_LOADED
+        // Every ShimmerCompat call is gated on SHIMMER_LOADED, including the ones whose bodies
+        // guard themselves: merely linking the class fails without Shimmer on the classpath.
+        boolean shimmer = dev.nano.ndidisplays.client.render.LedWallRenderer.SHIMMER_LOADED;
+        shimmerSaved = shimmer
                 ? dev.nano.ndidisplays.client.render.ShimmerCompat.suppressPostChains()
                 : null;
         // Shimmer queues bloom draws the way Theatrical queues beams: a list of callbacks drained
@@ -2403,14 +2496,22 @@ public final class CameraFeedManager {
         // the player's frame with the RIG camera's matrices baked in — the camera's lights and lit
         // windows painted across the player's sky as a translucent ghost. Suppressing the chain
         // stops the capture PROCESSING bloom, not queueing it, so the queue must be isolated too.
-        Object bloomSaved = dev.nano.ndidisplays.client.render.ShimmerCompat.isolateBloomQueues();
+        bloomSaved = shimmer
+                ? dev.nano.ndidisplays.client.render.ShimmerCompat.isolateBloomQueues() : null;
         // And Shimmer's bloom off entirely: its post targets copy from the main render target,
         // which during this capture is the camera's, so stale camera pixels could otherwise be
         // composited into the player's frame afterwards.
-        Boolean bloomFlag = dev.nano.ndidisplays.client.render.ShimmerCompat.suppressBloomFilter();
+        bloomFlag = shimmer
+                ? dev.nano.ndidisplays.client.render.ShimmerCompat.suppressBloomFilter() : null;
+        // Shimmer's post targets attach main's own textures; point them at the camera's buffer
+        // for the duration, so anything its hooks still draw lands in the feed, not the screen.
+        if (shimmer) {
+            dev.nano.ndidisplays.client.render.ShimmerCompat.hookPostTargets(captureTarget);
+            captureTarget.bindWrite(true);
+        }
         // Same hazard, different mod: see TheatricalLazyQueue. A beam queued inside this capture
         // and drawn in the player's frame samples whatever target was current when it was queued.
-        java.util.List<Object> beamsSaved =
+        beamsSaved =
                 dev.nano.ndidisplays.compat.theatrical.TheatricalCompat.LOADED
                         ? dev.nano.ndidisplays.compat.theatrical.TheatricalLazyQueue.isolate()
                         : null;
@@ -2418,7 +2519,6 @@ public final class CameraFeedManager {
         // triggers two full synchronous occlusion re-culls (rig view, then player again).
         dev.nano.ndidisplays.client.render.EmbeddiumCompat.pinCamera(view.pos(), view.pitch(), view.yaw());
 
-        try {
             // The frame's real partial tick, not 1.0F: the eye already moved smoothly, but the
             // WORLD in the shot — a jib arm mid-sweep, a dolly rolling, entities — was
             // interpolated to whole game ticks, so everything animated in a feed stepped
@@ -2454,7 +2554,9 @@ public final class CameraFeedManager {
             if (bloomSaved != null) {
                 dev.nano.ndidisplays.client.render.ShimmerCompat.restoreBloomQueues(bloomSaved);
             }
-            dev.nano.ndidisplays.client.render.ShimmerCompat.restoreBloomFilter(bloomFlag);
+            if (bloomFlag != null) {
+                dev.nano.ndidisplays.client.render.ShimmerCompat.restoreBloomFilter(bloomFlag);
+            }
             if (beamsSaved != null) {
                 dev.nano.ndidisplays.compat.theatrical.TheatricalLazyQueue.restore(beamsSaved);
             }
@@ -2493,6 +2595,10 @@ public final class CameraFeedManager {
             Entity restored = oldCameraEntity == null ? player : oldCameraEntity;
             camera.setup(level, restored, !mc.options.getCameraType().isFirstPerson(),
                     mc.options.getCameraType().isMirrored(), 1.0F);
+            // Back to the real screen, including any post target Shimmer created mid-capture.
+            if (dev.nano.ndidisplays.client.render.LedWallRenderer.SHIMMER_LOADED) {
+                dev.nano.ndidisplays.client.render.ShimmerCompat.hookPostTargets(oldMainTarget);
+            }
             mc.getMainRenderTarget().bindWrite(true);
 
         }

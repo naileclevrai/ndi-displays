@@ -43,8 +43,11 @@ public class CurvedScreenConfigScreen extends Screen {
     private float radius;
     private float arcAngle;
     private float screenHeight;
+    private float offset;
+    private float yOffset;
     private boolean convex;
     private int videoRepeat;
+    private boolean hideMount;
 
     private EditBox sourceBox;
     private NdiSourcePicker picker;
@@ -58,7 +61,10 @@ public class CurvedScreenConfigScreen extends Screen {
         this.pattern = screen.getTestPattern();
         this.radius = screen.getRadius();
         this.arcAngle = screen.getArcAngle();
+        this.hideMount = screen.isMountHidden();
         this.screenHeight = screen.getScreenHeight();
+        this.offset = screen.getOffset();
+        this.yOffset = screen.getYOffset();
         this.convex = screen.isConvex();
         this.videoRepeat = screen.getVideoRepeat();
     }
@@ -97,20 +103,26 @@ public class CurvedScreenConfigScreen extends Screen {
                         (btn, val) -> pattern = val));
         y += 22;
 
-        addRenderableWidget(new FloatSlider(left, y, 130, radius,
-                CurvedScreenBlockEntity.MIN_RADIUS, CurvedScreenBlockEntity.MAX_RADIUS,
-                v -> radius = (float) v,
-                v -> String.format("Radius: %.1f m", v)));
+        // Radius and height run 0.5 m to 256 m: nine doublings, so both sliders are
+        // logarithmic — linear would jump about 2 m per pixel and lose the small sizes.
+        addRenderableWidget(new FloatSlider(left, y, 130, Math.log(radius),
+                Math.log(CurvedScreenBlockEntity.MIN_RADIUS), Math.log(CurvedScreenBlockEntity.MAX_RADIUS),
+                v -> radius = snapMetres(Math.exp(v), CurvedScreenBlockEntity.MIN_RADIUS,
+                        CurvedScreenBlockEntity.MAX_RADIUS),
+                v -> "Radius: " + fmtMetres(snapMetres(Math.exp(v), CurvedScreenBlockEntity.MIN_RADIUS,
+                        CurvedScreenBlockEntity.MAX_RADIUS)) + " m"));
         addRenderableWidget(new FloatSlider(left + 134, y, 130, arcAngle,
                 CurvedScreenBlockEntity.MIN_ANGLE, CurvedScreenBlockEntity.MAX_ANGLE,
                 v -> arcAngle = (float) v,
                 v -> v >= 359.5 ? "Angle: 360\u00B0 (cylinder)" : String.format("Angle: %.0f\u00B0", v)));
         y += 22;
 
-        addRenderableWidget(new FloatSlider(left, y, 130, screenHeight,
-                CurvedScreenBlockEntity.MIN_HEIGHT, CurvedScreenBlockEntity.MAX_HEIGHT,
-                v -> screenHeight = (float) v,
-                v -> String.format("Height: %.1f m", v)));
+        addRenderableWidget(new FloatSlider(left, y, 130, Math.log(screenHeight),
+                Math.log(CurvedScreenBlockEntity.MIN_HEIGHT), Math.log(CurvedScreenBlockEntity.MAX_HEIGHT),
+                v -> screenHeight = snapMetres(Math.exp(v), CurvedScreenBlockEntity.MIN_HEIGHT,
+                        CurvedScreenBlockEntity.MAX_HEIGHT),
+                v -> "Height: " + fmtMetres(snapMetres(Math.exp(v), CurvedScreenBlockEntity.MIN_HEIGHT,
+                        CurvedScreenBlockEntity.MAX_HEIGHT)) + " m"));
         addRenderableWidget(new FloatSlider(left + 134, y, 130, brightness, 0.05, 1.0,
                 v -> brightness = (float) v,
                 v -> String.format("Brightness: %d%%", Math.round(v * 100))));
@@ -144,6 +156,30 @@ public class CurvedScreenConfigScreen extends Screen {
                                 new VideoProcessorScreen(this, screen.getBlockPos(),
                                         source.trim(), screen.crop())))
                 .bounds(left + 134, y, 130, 18).build());
+        y += 22;
+
+        // Hide the centre hub so only the arc shows (a column with an empty core, a floating arc).
+        addRenderableWidget(CycleButton.<Boolean>builder(val -> val
+                        ? Component.translatable("gui.ndidisplays.curved.mount_hidden")
+                        : Component.translatable("gui.ndidisplays.curved.mount_shown"))
+                .withValues(Boolean.FALSE, Boolean.TRUE)
+                .withInitialValue(hideMount)
+                .create(left, y, 130, 18, Component.translatable("gui.ndidisplays.curved.mount"),
+                        (btn, val) -> hideMount = val));
+        // Distance from the mount to the arc's centre. Square-law so the first metres are
+        // fine-grained while the far end still reaches 512 m; unlike radius it may be 0.
+        double sqrtMax = Math.sqrt(CurvedScreenBlockEntity.MAX_OFFSET);
+        addRenderableWidget(new FloatSlider(left + 134, y, 130, Math.sqrt(offset), 0.0, sqrtMax,
+                v -> offset = snapMetres(v * v, 0.0F, CurvedScreenBlockEntity.MAX_OFFSET),
+                v -> "Distance: " + fmtMetres(snapMetres(v * v, 0.0F, CurvedScreenBlockEntity.MAX_OFFSET)) + " m"));
+        y += 22;
+
+        // Vertical shift of the arc. Signed square-law: fine around zero, ±256 m at the ends.
+        double sqrtYMax = Math.sqrt(CurvedScreenBlockEntity.MAX_Y_OFFSET);
+        addRenderableWidget(new FloatSlider(left, y, 130, Math.copySign(Math.sqrt(Math.abs(yOffset)), yOffset),
+                -sqrtYMax, sqrtYMax,
+                v -> yOffset = signedSquare(v),
+                v -> "Height offset: " + fmtSigned(signedSquare(v)) + " m"));
         y += 28;
 
         addRenderableWidget(Button.builder(Component.translatable("gui.ndidisplays.winch.apply"), b -> apply())
@@ -162,8 +198,11 @@ public class CurvedScreenConfigScreen extends Screen {
                 radius,
                 arcAngle,
                 screenHeight,
+                offset,
+                yOffset,
                 convex,
-                videoRepeat));
+                videoRepeat,
+                hideMount));
         onClose();
     }
 
@@ -248,6 +287,26 @@ public class CurvedScreenConfigScreen extends Screen {
 
     private interface LabelFmt {
         String label(double v);
+    }
+
+    /** Snaps to 0.1 m under 16 m, 0.5 m under 64 m and whole metres above; the sliders
+     *  are logarithmic, so raw values carry meaningless fractions at the large end. */
+    private static float snapMetres(double v, float min, float max) {
+        double step = v < 16.0 ? 0.1 : v < 64.0 ? 0.5 : 1.0;
+        return (float) Math.max(min, Math.min(max, Math.round(v / step) * step));
+    }
+
+    private static float signedSquare(double v) {
+        float m = snapMetres(v * v, 0.0F, CurvedScreenBlockEntity.MAX_Y_OFFSET);
+        return v < 0 ? -m : m;
+    }
+
+    private static String fmtSigned(float v) {
+        return (v < 0 ? "-" : v > 0 ? "+" : "") + fmtMetres(Math.abs(v));
+    }
+
+    private static String fmtMetres(float v) {
+        return v < 64.0F ? String.format("%.1f", v) : String.format("%.0f", v);
     }
 
     private static class FloatSlider extends AbstractSliderButton {

@@ -17,6 +17,7 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.RenderShape;
@@ -58,6 +59,11 @@ public class MovingRigRenderer extends EntityRenderer<MovingRigEntity> {
      */
     private final WeakHashMap<MovingRigEntity, Ghosts> ghosts = new WeakHashMap<>();
 
+    private static final org.slf4j.Logger LOG = com.mojang.logging.LogUtils.getLogger();
+    /** One warning per distinct failure, not one per frame. */
+    private static final java.util.Set<String> REPORTED_GHOST_FAILURES =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     public MovingRigRenderer(EntityRendererProvider.Context ctx) {
         super(ctx);
     }
@@ -80,11 +86,20 @@ public class MovingRigRenderer extends EntityRenderer<MovingRigEntity> {
 
         BlockPos originBlock = BlockPos.containing(entity.getX(), entity.getY(), entity.getZ());
         Ghosts cache = ghosts(entity, structure, level, originBlock, tilt);
-        cache.pushLiveFixtures(entity, structure);
+        cache.pushLiveFixtures(entity, structure, level.getGameTime());
         // The batched cabinet mesh is not the block. Once the hoist has lifted it, that
         // mesh is still drawn where the cabinet took off, and mining cannot reach it.
         // The tick does the same, so a load that has flown off screen still clears.
         CabinetMeshCompat.dropLifted(level, structure);
+        // Where the rig origin is really being drawn this frame, as opposed to the
+        // whole-block cell the ghosts are addressed at. Same lerp as the entity render
+        // dispatcher, from xOld/yOld/zOld: those are stamped by the client level before
+        // every tick, whereas xo/yo/zo (what Entity#getPosition lerps from) are only
+        // stamped by Entity#tick, which the rig skips on the client.
+        Vec3 drawnOrigin = new Vec3(
+                Mth.lerp(partialTick, entity.xOld, entity.getX()),
+                Mth.lerp(partialTick, entity.yOld, entity.getY()),
+                Mth.lerp(partialTick, entity.zOld, entity.getZ()));
 
         for (int i = 0; i < structure.entries().size(); i++) {
             RigStructure.Entry entry = structure.entries().get(i);
@@ -111,8 +126,44 @@ public class MovingRigRenderer extends EntityRenderer<MovingRigEntity> {
             // at every cell the load passes through.
             boolean batchedCabinet = CabinetMeshCompat.owns(state);
             if (!batchedCabinet && RigStructure.clientNeedsBlockEntity(state)) {
-                drew = renderGhost(cache.entities().get(i), partialTick, poseStack, buffers,
-                        light);
+                BlockEntity ghost = cache.entities().get(i);
+                boolean fixture = ghost != null && HoistFixtureCompat.isFixture(state);
+                Vec3 delta = null;
+                int beamMark = -1;
+                boolean mounted = false;
+                if (fixture) {
+                    // Where this block's body is really drawn this frame (its min corner),
+                    // and how far that is from the whole-block cell the ghost is addressed at.
+                    Vec3 corner = sloped
+                            ? drawnOrigin.add(tilt.apply(offset.getX() + 0.5, offset.getY() + 0.5,
+                                    offset.getZ() + 0.5)).subtract(0.5, 0.5, 0.5)
+                            : drawnOrigin.add(offset.getX(), offset.getY(), offset.getZ());
+                    delta = corner.subtract(Vec3.atLowerCornerOf(ghost.getBlockPos()));
+                    HoistFixtureCompat.aimBeam(ghost, corner.add(0.5, 0.5, 0.5));
+                    if (!sloped && HoistFixtureCompat.isMountable(ghost)) {
+                        // Extra Lights: draw the ghost at its cell and carry the remainder in
+                        // the fixture's own mount offset, which every one of its render paths
+                        // applies - including the shared raymarched volume that anchors on
+                        // getBlockPos() in world space and cannot be shifted from outside.
+                        HoistFixtureCompat.mountAt(ghost, delta);
+                        poseStack.translate(-delta.x, -delta.y, -delta.z);
+                        mounted = true;
+                    } else {
+                        beamMark = HoistFixtureCompat.markBeams();
+                    }
+                    if (HoistFixtureCompat.DEBUG) {
+                        cache.trace(i, ghost, level.getGameTime(), partialTick, corner);
+                    }
+                }
+                drew = renderGhost(ghost, partialTick, poseStack, buffers, light);
+                if (fixture && !drew) {
+                    HoistFixtureCompat.debug("ghost #{} did not draw; fallback model used", i);
+                }
+                if (fixture && drew && !mounted) {
+                    // Theatrical anchors the beam on the ghost's block cell, not on this
+                    // pose. Slide it onto the body so it glides with the truss.
+                    HoistFixtureCompat.shiftBeamsSince(beamMark, delta);
+                }
                 if (!drew) {
                     BlockState visible = visibleFallback(state);
                     if (visible.getRenderShape() != RenderShape.INVISIBLE) {
@@ -153,9 +204,14 @@ public class MovingRigRenderer extends EntityRenderer<MovingRigEntity> {
             renderer.render(ghost, partialTick, poseStack, buffers, light,
                     OverlayTexture.NO_OVERLAY);
             return true;
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException e) {
             // A foreign renderer that assumes it is in the world (neighbours, a mixer
             // down the hall) must not take the rest of the rig with it.
+            String key = e.getClass().getName() + ": " + e.getMessage();
+            if (REPORTED_GHOST_FAILURES.add(key)) {
+                LOG.warn("[ndidisplays] ghost renderer for {} threw; drawing its baked model"
+                        + " instead ({})", ghost.getType(), key, e);
+            }
             return false;
         }
     }
@@ -203,6 +259,8 @@ public class MovingRigRenderer extends EntityRenderer<MovingRigEntity> {
             return cache;
         }
         cache = new Ghosts(structure, origin, attitude);
+        HoistFixtureCompat.debug("client ghosts rebuilt: origin {} attitude {} entityY={}",
+                origin, attitude, String.format("%.3f", entity.getY()));
         for (RigStructure.Entry entry : structure.entries()) {
             if (CabinetMeshCompat.owns(entry.state())) {
                 cache.entities().add(null);
@@ -259,6 +317,20 @@ public class MovingRigRenderer extends EntityRenderer<MovingRigEntity> {
         private final long attitude;
         private final List<BlockEntity> entities = new ArrayList<>();
         private CompoundTag appliedLive = new CompoundTag();
+        private long settledTick = Long.MIN_VALUE;
+        /** Last logged head-state per ghost index, for the diagnostic log. */
+        private final java.util.Map<Integer, String> traced = new java.util.HashMap<>();
+
+        /** Logs a fixture ghost's head state whenever it differs from the last frame. */
+        void trace(int index, BlockEntity ghost, long tick, float partialTick, Vec3 corner) {
+            String now = HoistFixtureCompat.describe(ghost);
+            if (!now.equals(traced.get(index))) {
+                traced.put(index, now);
+                HoistFixtureCompat.debug("client frame tick {} pt={} ghost #{} cell {} corner {} :: {}",
+                        tick, String.format("%.2f", partialTick), index, ghost.getBlockPos(),
+                        String.format("%.3f,%.3f,%.3f", corner.x, corner.y, corner.z), now);
+            }
+        }
 
         Ghosts(RigStructure source, BlockPos origin, long attitude) {
             this.source = source;
@@ -271,19 +343,28 @@ public class MovingRigRenderer extends EntityRenderer<MovingRigEntity> {
         }
 
         /**
-         * Copies the rig's live lighting state onto the ghosts, when it has changed.
+         * Copies the rig's live lighting state onto the ghosts, when it has changed, and
+         * keeps their head interpolation ticking over.
          *
-         * Once per change rather than once per frame: a fixture reloads itself from NBT to
-         * take the values, and re-running that at the frame rate for a truss of moving
-         * heads would be measurable for no benefit — nothing looks at it in between.
+         * A change makes the heads sweep from their previous position over the current
+         * tick, the way Theatrical animates a bolted fixture. A tick without a change
+         * settles them, so the sweep does not replay every frame. A freshly built cache
+         * (new ghosts, loaded from the take-off snapshot) takes the values without a sweep:
+         * otherwise every block boundary would swing the heads from take-off to now.
          */
-        void pushLiveFixtures(MovingRigEntity entity, RigStructure structure) {
+        void pushLiveFixtures(MovingRigEntity entity, RigStructure structure, long tick) {
             CompoundTag live = entity.fixtureState();
-            if (live.isEmpty() || live.equals(appliedLive)) {
-                return;
+            boolean fresh = appliedLive.isEmpty();
+            if (!live.isEmpty() && !live.equals(appliedLive)) {
+                HoistFixtureCompat.debug("client apply tick {} fresh={} live:{}", tick, fresh,
+                        HoistFixtureCompat.describe(live));
+                HoistFixtureCompat.applyLive(live, entities, structure, !fresh);
+                appliedLive = live.copy();
+                settledTick = tick;
+            } else if (tick != settledTick) {
+                HoistFixtureCompat.settle(entities);
+                settledTick = tick;
             }
-            HoistFixtureCompat.applyLive(live, entities, structure);
-            appliedLive = live.copy();
         }
     }
 }

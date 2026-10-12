@@ -29,16 +29,27 @@ import javax.annotation.Nullable;
  */
 public class CurvedScreenBlock extends HorizontalDirectionalBlock implements EntityBlock {
 
+    /**
+     * True hides the mount hub: the block renders nothing and shrinks to a small hitbox, so
+     * only the video arc is visible — for a screen hung in free air or a column with nothing
+     * at its centre. The hub can still be targeted (outline on hover) to reopen its config.
+     */
+    public static final net.minecraft.world.level.block.state.properties.BooleanProperty HIDDEN =
+            net.minecraft.world.level.block.state.properties.BooleanProperty.create("hidden");
+
     private static final VoxelShape SHAPE = Block.box(4, 4, 4, 12, 12, 12);
+    private static final VoxelShape SHAPE_HIDDEN = Block.box(6, 6, 6, 10, 10, 10);
 
     public CurvedScreenBlock(Properties properties) {
         super(properties);
-        registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH));
+        registerDefaultState(stateDefinition.any()
+                .setValue(FACING, Direction.NORTH)
+                .setValue(HIDDEN, false));
     }
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-        builder.add(FACING);
+        builder.add(FACING, HIDDEN);
     }
 
     @Override
@@ -49,7 +60,7 @@ public class CurvedScreenBlock extends HorizontalDirectionalBlock implements Ent
 
     @Override
     public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext ctx) {
-        return SHAPE;
+        return state.getValue(HIDDEN) ? SHAPE_HIDDEN : SHAPE;
     }
 
     @Override

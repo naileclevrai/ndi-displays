@@ -21,7 +21,7 @@ import java.util.function.Supplier;
  * Client → server: sets a screen's input window (video-processor crop) — the
  * rectangle of the source frame the screen displays. Works on LED walls (fans out
  * to every panel of the detected wall so the wall stays one coherent surface),
- * round screens and curved screens.
+ * round, spherical and curved screens.
  */
 public record UpdateScreenCropPacket(BlockPos pos, float u0, float v0, float u1, float v1) {
 
@@ -55,6 +55,9 @@ public record UpdateScreenCropPacket(BlockPos pos, float u0, float v0, float u1,
             } else if (be instanceof RoundScreenBlockEntity round) {
                 round.crop().set(msg.u0, msg.v0, msg.u1, msg.v1);
                 sync(level, round);
+            } else if (be instanceof dev.nano.ndidisplays.block.SphereScreenBlockEntity sphere) {
+                sphere.crop().set(msg.u0, msg.v0, msg.u1, msg.v1);
+                sync(level, sphere);
             } else if (be instanceof CurvedScreenBlockEntity curved) {
                 curved.crop().set(msg.u0, msg.v0, msg.u1, msg.v1);
                 sync(level, curved);
@@ -65,24 +68,15 @@ public record UpdateScreenCropPacket(BlockPos pos, float u0, float v0, float u1,
         ctx.get().setPacketHandled(true);
     }
 
-    /** Every panel of the wall gets the same window: the anchor draws for all of them. */
+    /**
+     * Every panel of the screen gets the same window: the anchor draws for all of them, and
+     * that includes the far side of a corner or chamfer, which a rectangle walk never reached.
+     */
     private static void applyToWall(Level level, LedPanelBlockEntity panel, UpdateScreenCropPacket msg) {
-        WallScanner.WallInfo wall = panel.getWallInfo();
-        if (wall == null) {
-            panel.crop().set(msg.u0, msg.v0, msg.u1, msg.v1);
-            sync(level, panel);
-            return;
-        }
-        Vec3i right = wall.facing().rightStep();
-        for (int w = 0; w < wall.width(); w++) {
-            for (int h = 0; h < wall.height(); h++) {
-                BlockPos p = wall.anchor()
-                        .offset(right.getX() * w, right.getY() * w, right.getZ() * w)
-                        .above(h);
-                if (level.getBlockEntity(p) instanceof LedPanelBlockEntity other) {
-                    other.crop().set(msg.u0, msg.v0, msg.u1, msg.v1);
-                    sync(level, other);
-                }
+        for (BlockPos p : panel.screenGroup()) {
+            if (level.getBlockEntity(p) instanceof LedPanelBlockEntity other) {
+                other.crop().set(msg.u0, msg.v0, msg.u1, msg.v1);
+                sync(level, other);
             }
         }
     }

@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.Field;
 
 /**
  * Everything that touches a Theatrical type on behalf of a flown lighting fixture. Only
@@ -30,8 +31,27 @@ import javax.annotation.Nullable;
  */
 final class HoistFixtureHooks {
 
-    /** pan, tilt, focus, intensity, red, green, blue. */
-    static final int VALUE_COUNT = 7;
+    /**
+     * Theatrical's interpolation and beam-length state, reached directly. {@code read()}
+     * forces prevPan = pan and prevTilt = tilt, so a ghost fed through NBT can never
+     * interpolate: every new head position is a snap, and a pan/tilt effect that glides
+     * on a bolted fixture stutters on a flown one. Ghosts never tick, so nothing else
+     * maintains these fields; this class does it in their place.
+     */
+    private static final Field PREV_PAN = field("prevPan");
+    private static final Field PREV_TILT = field("prevTilt");
+    private static final Field DISTANCE = field("distance");
+
+    @Nullable
+    private static Field field(String name) {
+        try {
+            Field f = BaseLightBlockEntity.class.getDeclaredField(name);
+            f.setAccessible(true);
+            return f;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
 
     private HoistFixtureHooks() {
     }
@@ -92,78 +112,100 @@ final class HoistFixtureHooks {
         }
     }
 
-    /** Live head state, or null when this proxy is not a light. */
+    /**
+     * The proxy's complete saved state, or null when this proxy is not a light.
+     *
+     * The whole tag rather than a fixed list of channels: a modded fixture keeps its gobo,
+     * zoom, colour wheel or prism wherever it likes, and the one thing every fixture has
+     * in common is that it writes that state to NBT for its own client sync. Position is
+     * left out (saveWithoutMetadata) and put back per ghost on the client.
+     */
     @Nullable
-    static int[] readLive(BlockEntity proxy) {
-        if (!(proxy instanceof BaseLightBlockEntity light)) {
+    static CompoundTag readLive(BlockEntity proxy) {
+        if (!(proxy instanceof BaseLightBlockEntity)) {
             return null;
         }
-        return new int[] {
-                light.getPan(),
-                light.getTilt(),
-                light.getFocus(),
-                (int) light.getIntensity(),
-                light.getRed(),
-                light.getGreen(),
-                light.getBlue(),
-        };
+        return proxy.saveWithoutMetadata();
     }
 
     /**
-     * Pushes live head state onto a client-side ghost fixture.
+     * Pushes the proxy's live state onto a client-side ghost fixture.
      *
-     * The values go in through the fixture's own NBT rather than setters, because a light
-     * only exposes {@code setPan} and {@code setTilt} — intensity and colour are protected.
-     * Reloading from a merged tag is both complete and version-proof: whatever a modded
-     * fixture keeps alongside the standard fields comes straight back from the snapshot.
+     * The state goes in through the fixture's own NBT rather than setters, because a light
+     * only exposes {@code setPan} and {@code setTilt} — intensity, colour and every modded
+     * extra are protected or private. Reloading is both complete and version-proof:
+     * whatever the fixture wrote on the server comes straight back here.
      */
-    static void applyLive(BlockEntity ghost, CompoundTag captured, int[] values) {
+    static void applyLive(BlockEntity ghost, CompoundTag live, boolean interpolate) {
         if (!(ghost instanceof BaseLightBlockEntity light)) {
             return;
         }
-        CompoundTag tag = merged(captured, values, ghost.getBlockPos(), light.getDistance());
+        int fromPan = light.getPan();
+        int fromTilt = light.getTilt();
+        CompoundTag tag = positioned(live, ghost.getBlockPos());
+        // Beam length stays the client's: it is measured from where the ghost is drawn,
+        // which the server proxy, parked at the take-off cell, knows nothing about.
+        tag.putDouble("distance", light.getDistance());
         ghost.load(tag);
-
-        // Beam length. The fixture works this out in its own ticker, which never runs for a
-        // ghost, so without this every flown beam would keep the length it had on the truss
-        // — punching through the stage floor on the way up, stopping short on the way down.
-        if (light.getIntensity() > 0) {
-            double distance = safeRayTrace(light);
-            if (distance >= 0 && Math.abs(distance - light.getDistance()) > 0.5) {
-                ghost.load(merged(captured, values, ghost.getBlockPos(), distance));
-            }
+        if (interpolate) {
+            // Sweep from where the head was to where it is now over this tick, exactly as
+            // Theatrical's own storePrev() would have arranged on a ticking fixture.
+            setInt(PREV_PAN, light, fromPan);
+            setInt(PREV_TILT, light, fromTilt);
         }
     }
 
-    private static double safeRayTrace(BaseLightBlockEntity light) {
+    /** One-line summary of a light's head state, for the flown-fixture diagnostic log. */
+    static String describe(BlockEntity be) {
+        if (!(be instanceof BaseLightBlockEntity light)) {
+            return "not-a-light";
+        }
+        return String.format("pan=%d/%d tilt=%d/%d focus=%d int=%.0f/%d rgb=%d,%d,%d dist=%.2f",
+                light.getPan(), light.getPrevPan(), light.getTilt(), light.getPrevTilt(),
+                light.getFocus(), light.getIntensity(), light.getPrevIntensity(),
+                light.getRed(), light.getGreen(), light.getBlue(), light.getDistance());
+    }
+
+    /** Same summary read straight from a synced state tag. */
+    static String describe(CompoundTag tag) {
+        return String.format("pan=%d tilt=%d focus=%d int=%d rgb=%d,%d,%d gobo=%d zoom=%d",
+                tag.getInt("pan"), tag.getInt("tilt"), tag.getInt("focus"), tag.getInt("intensity"),
+                tag.getInt("red"), tag.getInt("green"), tag.getInt("blue"),
+                tag.getInt("gobo"), tag.getInt("zoom"));
+    }
+
+    /**
+     * Ends the previous tick's sweep: previous = current, so the head holds still until
+     * the next change. Called once per tick on every ghost that got no new values.
+     */
+    static void settle(BlockEntity ghost) {
+        if (ghost instanceof BaseLightBlockEntity light) {
+            setInt(PREV_PAN, light, light.getPan());
+            setInt(PREV_TILT, light, light.getTilt());
+        }
+    }
+
+    /** Beam length without a reload, so a per-frame update cannot disturb the sweep. */
+    static void setDistance(BaseLightBlockEntity light, double distance) {
+        if (DISTANCE == null) {
+            return;
+        }
         try {
-            return light.doRayTrace();
-        } catch (RuntimeException | LinkageError e) {
-            // A raycast is a nicety. A fixture whose geometry this build does not
-            // understand keeps its captured beam length instead of killing the frame.
-            return -1;
+            DISTANCE.setDouble(light, distance);
+        } catch (IllegalAccessException | RuntimeException ignored) {
+            // Cosmetic: the beam keeps its last length.
         }
     }
 
-    private static CompoundTag merged(CompoundTag captured, int[] values, BlockPos pos,
-                                      double distance) {
-        CompoundTag tag = positioned(captured, pos);
-        tag.putInt("pan", values[0]);
-        tag.putInt("tilt", values[1]);
-        tag.putInt("focus", values[2]);
-        tag.putInt("intensity", values[3]);
-        tag.putInt("red", values[4]);
-        tag.putInt("green", values[5]);
-        tag.putInt("blue", values[6]);
-        // Previous values are what the fixture interpolates from. Setting them equal to the
-        // new ones stops a ghost rebuilt mid-move from sweeping its head across the stage to
-        // catch up with a position it is already in.
-        tag.putInt("prevIntensity", values[3]);
-        tag.putInt("prevRed", values[4]);
-        tag.putInt("prevGreen", values[5]);
-        tag.putInt("prevBlue", values[6]);
-        tag.putDouble("distance", distance);
-        return tag;
+    private static void setInt(@Nullable Field field, BaseLightBlockEntity light, int value) {
+        if (field == null) {
+            return;
+        }
+        try {
+            field.setInt(light, value);
+        } catch (IllegalAccessException | RuntimeException ignored) {
+            // Cosmetic: the head snaps instead of sweeping.
+        }
     }
 
     private static CompoundTag positioned(CompoundTag captured, BlockPos pos) {

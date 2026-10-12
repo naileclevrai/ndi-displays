@@ -6,7 +6,7 @@
             "entries": [
                 {
                     "type": "minecraft:item",
-                    "name": "ndidisplays:led_corner_panel"
+                    "name": "ndidisplays:sphere_screen"
                 }
             ],
             "conditions": [

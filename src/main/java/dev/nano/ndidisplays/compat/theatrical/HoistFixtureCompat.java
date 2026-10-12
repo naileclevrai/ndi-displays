@@ -44,12 +44,56 @@ public final class HoistFixtureCompat {
 
     private static final Logger LOG = LogUtils.getLogger();
 
-    /** Live head state per fixture: index into the snapshot, then seven channel values. */
+    /** Live state per fixture: index into the snapshot, then the proxy's full saved tag. */
     private static final String LIST = "L";
     private static final String INDEX = "i";
-    private static final String VALUES = "v";
+    private static final String STATE = "t";
 
     private static volatile boolean broken;
+
+    /**
+     * {@code -Dndidisplays.debugFlownFixtures=true}: log every change to a flown fixture's
+     * head state, per frame on the client and per tick on the server, so a one-tick glitch
+     * can be pinned to the side and the value that produced it.
+     */
+    public static final boolean DEBUG = Boolean.getBoolean("ndidisplays.debugFlownFixtures");
+
+    public static void debug(String message, Object... args) {
+        if (DEBUG) {
+            LOG.info("[ndidisplays] flown-fixture " + message, args);
+        }
+    }
+
+    /** Head-state summary of a ghost or proxy, or "" when the integration is off. */
+    public static String describe(@Nullable BlockEntity be) {
+        if (!active() || be == null) {
+            return "";
+        }
+        try {
+            return HoistFixtureHooks.describe(be);
+        } catch (RuntimeException | LinkageError e) {
+            return "describe-failed";
+        }
+    }
+
+    /** Summary of every fixture in a synced live tag, one line per fixture. */
+    public static String describe(CompoundTag live) {
+        if (!active() || live.isEmpty()) {
+            return "";
+        }
+        try {
+            StringBuilder sb = new StringBuilder();
+            ListTag list = live.getList(LIST, Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+                CompoundTag item = list.getCompound(i);
+                sb.append(" #").append(item.getInt(INDEX)).append(' ')
+                        .append(HoistFixtureHooks.describe(item.getCompound(STATE)));
+            }
+            return sb.toString();
+        } catch (RuntimeException | LinkageError e) {
+            return "describe-failed";
+        }
+    }
 
     /**
      * Proxies per flying rig. Server-side only, and deliberately not persisted: a restart
@@ -147,13 +191,13 @@ public final class HoistFixtureCompat {
         try {
             ListTag list = new ListTag();
             for (Tracked entry : tracked) {
-                int[] values = HoistFixtureHooks.readLive(entry.proxy());
-                if (values == null) {
+                CompoundTag state = HoistFixtureHooks.readLive(entry.proxy());
+                if (state == null) {
                     continue;
                 }
                 CompoundTag item = new CompoundTag();
                 item.putInt(INDEX, entry.index());
-                item.putIntArray(VALUES, values);
+                item.put(STATE, state);
                 list.add(item);
             }
             if (list.isEmpty()) {
@@ -201,6 +245,47 @@ public final class HoistFixtureCompat {
     }
 
     /**
+     * Writes each proxy's current state back into the snapshot the load will be placed
+     * from, so a landed fixture keeps the look it had in the air rather than the one it
+     * took off with. Without this every set-down snapped pan, tilt, gobo and colour back
+     * to the take-off cue until the desk's next frame arrived. Call before {@link #release}.
+     */
+    public static void freshenSnapshot(UUID rigId, RigStructure structure) {
+        if (!active() || rigId == null || structure == null) {
+            return;
+        }
+        List<Tracked> tracked;
+        synchronized (TRACKED) {
+            tracked = TRACKED.get(rigId);
+        }
+        if (tracked == null) {
+            return;
+        }
+        try {
+            List<RigStructure.Entry> entries = structure.entries();
+            for (Tracked entry : tracked) {
+                if (entry.index() >= entries.size()) {
+                    continue;
+                }
+                CompoundTag target = entries.get(entry.index()).blockEntity();
+                CompoundTag state = HoistFixtureHooks.readLive(entry.proxy());
+                if (target == null || state == null) {
+                    continue;
+                }
+                // Overlay rather than replace: the snapshot's id and position keys stay.
+                for (String key : state.getAllKeys()) {
+                    Tag value = state.get(key);
+                    if (value != null) {
+                        target.put(key, value.copy());
+                    }
+                }
+            }
+        } catch (RuntimeException | LinkageError e) {
+            markBroken(e);
+        }
+    }
+
+    /**
      * Hands the fixtures back to the world. Called before the load is placed, so the real
      * block entities register themselves cleanly rather than fighting a stale proxy for the
      * same DMX address.
@@ -232,14 +317,105 @@ public final class HoistFixtureCompat {
 
     // ------------------------------------------------------------------ client
 
+    /** Ends the ghosts' head sweeps for a tick that brought no new values. */
+    public static void settle(List<BlockEntity> ghosts) {
+        if (!active()) {
+            return;
+        }
+        try {
+            for (BlockEntity ghost : ghosts) {
+                if (ghost != null) {
+                    HoistFixtureHooks.settle(ghost);
+                }
+            }
+        } catch (RuntimeException | LinkageError e) {
+            markBroken(e);
+        }
+    }
+
+    /** True for an Extra Lights fixture whose mount transform can carry a sub-block offset. */
+    public static boolean isMountable(@Nullable BlockEntity ghost) {
+        if (ghost == null || !active()) {
+            return false;
+        }
+        try {
+            return HoistMountHooks.isMountable(ghost);
+        } catch (RuntimeException | LinkageError e) {
+            markBroken(e);
+            return false;
+        }
+    }
+
+    /**
+     * Puts {@code delta}, the ghost's displacement from its block cell this frame, into an
+     * Extra Lights fixture's mount offset, so body, quads and the shared raymarched volume
+     * all draw it there. The caller poses the ghost at the cell itself.
+     */
+    public static void mountAt(BlockEntity ghost, net.minecraft.world.phys.Vec3 delta) {
+        if (ghost == null || !active()) {
+            return;
+        }
+        try {
+            HoistMountHooks.mountAt(ghost, delta);
+        } catch (RuntimeException | LinkageError e) {
+            markBroken(e);
+        }
+    }
+
+    /**
+     * Snapshot of Theatrical's beam queue before a ghost fixture is drawn, for
+     * {@link #shiftBeamsSince}. Negative when beams cannot be re-anchored on this build.
+     */
+    public static int markBeams() {
+        if (!active()) {
+            return -1;
+        }
+        try {
+            return HoistBeamHooks.available() ? HoistBeamHooks.mark() : -1;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            markBroken(e);
+            return -1;
+        }
+    }
+
+    /**
+     * Moves every beam a ghost fixture just queued by {@code delta}: the distance from the
+     * whole-block cell the ghost is addressed at to where its body was actually drawn.
+     */
+    public static void shiftBeamsSince(int mark, net.minecraft.world.phys.Vec3 delta) {
+        if (mark < 0 || !active() || delta.lengthSqr() < 1.0e-8) {
+            return;
+        }
+        try {
+            HoistBeamHooks.shiftSince(mark, delta);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            markBroken(e);
+        }
+    }
+
+    /**
+     * Points a ghost fixture's beam at the first surface from where its body is drawn this
+     * frame, so the beam ends on the floor rather than a whole-block figure away from it.
+     */
+    public static void aimBeam(BlockEntity ghost, net.minecraft.world.phys.Vec3 drawnCentre) {
+        if (ghost == null || !active()) {
+            return;
+        }
+        try {
+            HoistBeamHooks.aimBeam(ghost, drawnCentre);
+        } catch (RuntimeException | LinkageError e) {
+            markBroken(e);
+        }
+    }
+
     /**
      * Pushes the synced head state onto the ghost fixtures the rig renderer is drawing.
      *
      * @param ghosts   one entry per snapshot block, null where the block has no ghost
-     * @param captured the snapshot, for the fixture NBT the live values are merged into
+     * @param captured the snapshot the ghosts were built from, for bounds
      */
     public static void applyLive(CompoundTag live, List<BlockEntity> ghosts,
-                                 RigStructure captured) {
+                                 RigStructure captured, boolean interpolate) {
         if (!active() || live.isEmpty()) {
             return;
         }
@@ -252,15 +428,10 @@ public final class HoistFixtureCompat {
                     continue;
                 }
                 BlockEntity ghost = ghosts.get(index);
-                CompoundTag tag = captured.entries().get(index).blockEntity();
-                if (ghost == null || tag == null) {
+                if (ghost == null || !item.contains(STATE, Tag.TAG_COMPOUND)) {
                     continue;
                 }
-                int[] values = item.getIntArray(VALUES);
-                if (values.length < HoistFixtureHooks.VALUE_COUNT) {
-                    continue;
-                }
-                HoistFixtureHooks.applyLive(ghost, tag, values);
+                HoistFixtureHooks.applyLive(ghost, item.getCompound(STATE), interpolate);
             }
         } catch (RuntimeException | LinkageError e) {
             markBroken(e);
