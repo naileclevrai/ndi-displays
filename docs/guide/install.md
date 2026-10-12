@@ -54,6 +54,7 @@ Easiest path: OBS + [DistroAV / obs-ndi](https://distroav.org/) → *Tools → D
 |-----|-----|
 | [Shimmer](https://www.curseforge.com/minecraft/mc-mods/shimmer) | Bloom from live wall content |
 | [Theatrical](https://github.com/theatricalmod/Theatrical) | DMX on winches and screens; Extra Lights fixtures on a winch hook |
+| [Theatrical Extra Lights](/stage/extra-lights) | Volumetric beams on flown fixtures (optional, after Theatrical) |
 | Xaero Minimap / World Map | Import world waypoints into a drone path |
 | MCEF | Required for the [Web Terminal](/blocks/web-terminal) browser |
 
