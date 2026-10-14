@@ -4,6 +4,8 @@
 
 Walkable module on the XZ plane. Adjacent same-facing tiles stitch into one floor canvas — colour bars, grids, or live video underfoot.
 
+Click the **underside** of a block with the same item and the tile hangs on the ceiling, picture facing down. Ceiling tiles stitch with each other, not with the floor. Breaking one gives the floor item back. The side of a tile already on the ceiling continues the ceiling.
+
 ## Registry ID
 
 `ndidisplays:led_floor`

@@ -10,6 +10,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import dev.nano.ndidisplays.block.CropWindow;
 import dev.nano.ndidisplays.block.FloorScanner;
+import dev.nano.ndidisplays.block.LedFloorBlock;
 import dev.nano.ndidisplays.block.LedFloorBlockEntity;
 import dev.nano.ndidisplays.client.ClientSetup;
 import net.minecraft.client.renderer.LightTexture;
@@ -48,15 +49,17 @@ public class LedFloorRenderer implements BlockEntityRenderer<LedFloorBlockEntity
         }
 
         int mode = be.getTestPattern();
-        Vec3[] corners = corners(floor);
+        boolean ceiling = ceiling(be);
+        Vec3[] corners = corners(floor, ceiling);
         Vec3 p00 = corners[0];
         Vec3 p10 = corners[1];
         Vec3 p11 = corners[2];
         Vec3 p01 = corners[3];
-        Vec3 up = new Vec3(0, 1, 0);
+        // A ceiling tile is seen from below, so its front face points down.
+        Vec3 up = ceiling ? new Vec3(0, -1, 0) : new Vec3(0, 1, 0);
 
         if (ShaderPackCompat.shaderPackActive()) {
-            renderShaderPackCompat(be, floor, mode, p00, p10, p11, p01, up, poseStack, buffers);
+            renderShaderPackCompat(be, floor, mode, ceiling, p00, p10, p11, p01, up, poseStack, buffers);
             return;
         }
 
@@ -91,10 +94,17 @@ public class LedFloorRenderer implements BlockEntityRenderer<LedFloorBlockEntity
         Vec3 rv = Vec3.atLowerCornerOf(FloorScanner.right(floor.facing()).getNormal());
         Vec3 fv = Vec3.atLowerCornerOf(floor.facing().getNormal());
         if (!floor.isShaped()) {
-            vertex(builder, mat, p00, 0.0F, 1.0F);
-            vertex(builder, mat, p10, 1.0F, 1.0F);
-            vertex(builder, mat, p11, 1.0F, 0.0F);
-            vertex(builder, mat, p01, 0.0F, 0.0F);
+            if (ceiling) {
+                vertex(builder, mat, p00, 0.0F, 1.0F);
+                vertex(builder, mat, p01, 0.0F, 0.0F);
+                vertex(builder, mat, p11, 1.0F, 0.0F);
+                vertex(builder, mat, p10, 1.0F, 1.0F);
+            } else {
+                vertex(builder, mat, p00, 0.0F, 1.0F);
+                vertex(builder, mat, p10, 1.0F, 1.0F);
+                vertex(builder, mat, p11, 1.0F, 0.0F);
+                vertex(builder, mat, p01, 0.0F, 0.0F);
+            }
         } else {
             // One quad per run of tiles — the Eurovision-cross case. Frame = bounding box;
             // the build masks it.
@@ -105,10 +115,17 @@ public class LedFloorRenderer implements BlockEntityRenderer<LedFloorBlockEntity
                 float u1 = run[1] / (float) floor.width();
                 float vB = 1.0F - run[2] / (float) floor.depth();
                 float vT = 1.0F - (run[2] + 1) / (float) floor.depth();
-                vertex(builder, mat, bl, u0, vB);
-                vertex(builder, mat, br, u1, vB);
-                vertex(builder, mat, br.add(fv), u1, vT);
-                vertex(builder, mat, bl.add(fv), u0, vT);
+                if (ceiling) {
+                    vertex(builder, mat, bl, u0, vB);
+                    vertex(builder, mat, bl.add(fv), u0, vT);
+                    vertex(builder, mat, br.add(fv), u1, vT);
+                    vertex(builder, mat, br, u1, vB);
+                } else {
+                    vertex(builder, mat, bl, u0, vB);
+                    vertex(builder, mat, br, u1, vB);
+                    vertex(builder, mat, br.add(fv), u1, vT);
+                    vertex(builder, mat, bl.add(fv), u0, vT);
+                }
             }
         }
         // Depth-bias the video face off its cabinet. The face sits a few millimetres proud of
@@ -151,16 +168,23 @@ public class LedFloorRenderer implements BlockEntityRenderer<LedFloorBlockEntity
         }
     }
 
+    private static boolean ceiling(LedFloorBlockEntity be) {
+        return be.getBlockState().getBlock() instanceof LedFloorBlock block && block.isCeiling();
+    }
+
     /**
      * Corners in local space of the anchor: p00 image bottom-left (u=0,v=1) through
-     * p11 image top-right (u=1,v=0), looking down onto the floor.
+     * p11 image top-right (u=1,v=0), looking down onto the floor. A ceiling tile sits
+     * on the underside of the slab.
      */
-    private static Vec3[] corners(FloorScanner.FloorInfo floor) {
+    private static Vec3[] corners(FloorScanner.FloorInfo floor, boolean ceiling) {
         Direction facing = floor.facing();
         Direction right = FloorScanner.right(facing);
         Vec3 r = Vec3.atLowerCornerOf(right.getNormal());
         Vec3 f = Vec3.atLowerCornerOf(facing.getNormal());
-        float y = THICKNESS + SURFACE_EPSILON;
+        float y = ceiling
+                ? 1.0F - THICKNESS - SURFACE_EPSILON
+                : THICKNESS + SURFACE_EPSILON;
         Vec3 origin = new Vec3(0.5, y, 0.5)
                 .subtract(r.scale(0.5))
                 .subtract(f.scale(0.5))
@@ -175,8 +199,8 @@ public class LedFloorRenderer implements BlockEntityRenderer<LedFloorBlockEntity
     }
 
     private void renderShaderPackCompat(LedFloorBlockEntity be, FloorScanner.FloorInfo floor, int mode,
-                                        Vec3 p00, Vec3 p10, Vec3 p11, Vec3 p01, Vec3 normal,
-                                        PoseStack poseStack, MultiBufferSource buffers) {
+                                        boolean ceiling, Vec3 p00, Vec3 p10, Vec3 p11, Vec3 p01,
+                                        Vec3 normal, PoseStack poseStack, MultiBufferSource buffers) {
         float bright = be.getEffectiveBrightness();
         ResourceLocation tex;
         float cr = 1.0F;
@@ -204,10 +228,17 @@ public class LedFloorRenderer implements BlockEntityRenderer<LedFloorBlockEntity
         Matrix4f mat = poseStack.last().pose();
         VertexConsumer vc = buffers.getBuffer(RenderType.entityTranslucentEmissive(tex));
         if (!floor.isShaped()) {
-            compatVertex(vc, mat, p00, crop.u0(), crop.v1(), normal, cr * bright, cg * bright, cb * bright);
-            compatVertex(vc, mat, p10, crop.u1(), crop.v1(), normal, cr * bright, cg * bright, cb * bright);
-            compatVertex(vc, mat, p11, crop.u1(), crop.v0(), normal, cr * bright, cg * bright, cb * bright);
-            compatVertex(vc, mat, p01, crop.u0(), crop.v0(), normal, cr * bright, cg * bright, cb * bright);
+            if (ceiling) {
+                compatVertex(vc, mat, p00, crop.u0(), crop.v1(), normal, cr * bright, cg * bright, cb * bright);
+                compatVertex(vc, mat, p01, crop.u0(), crop.v0(), normal, cr * bright, cg * bright, cb * bright);
+                compatVertex(vc, mat, p11, crop.u1(), crop.v0(), normal, cr * bright, cg * bright, cb * bright);
+                compatVertex(vc, mat, p10, crop.u1(), crop.v1(), normal, cr * bright, cg * bright, cb * bright);
+            } else {
+                compatVertex(vc, mat, p00, crop.u0(), crop.v1(), normal, cr * bright, cg * bright, cb * bright);
+                compatVertex(vc, mat, p10, crop.u1(), crop.v1(), normal, cr * bright, cg * bright, cb * bright);
+                compatVertex(vc, mat, p11, crop.u1(), crop.v0(), normal, cr * bright, cg * bright, cb * bright);
+                compatVertex(vc, mat, p01, crop.u0(), crop.v0(), normal, cr * bright, cg * bright, cb * bright);
+            }
         } else {
             Vec3 rv = Vec3.atLowerCornerOf(FloorScanner.right(floor.facing()).getNormal());
             Vec3 fv = Vec3.atLowerCornerOf(floor.facing().getNormal());
@@ -218,10 +249,17 @@ public class LedFloorRenderer implements BlockEntityRenderer<LedFloorBlockEntity
                 float u1 = crop.u0() + crop.du() * run[1] / (float) floor.width();
                 float vB = crop.v0() + crop.dv() * (1.0F - run[2] / (float) floor.depth());
                 float vT = crop.v0() + crop.dv() * (1.0F - (run[2] + 1) / (float) floor.depth());
-                compatVertex(vc, mat, bl, u0, vB, normal, cr * bright, cg * bright, cb * bright);
-                compatVertex(vc, mat, br, u1, vB, normal, cr * bright, cg * bright, cb * bright);
-                compatVertex(vc, mat, br.add(fv), u1, vT, normal, cr * bright, cg * bright, cb * bright);
-                compatVertex(vc, mat, bl.add(fv), u0, vT, normal, cr * bright, cg * bright, cb * bright);
+                if (ceiling) {
+                    compatVertex(vc, mat, bl, u0, vB, normal, cr * bright, cg * bright, cb * bright);
+                    compatVertex(vc, mat, bl.add(fv), u0, vT, normal, cr * bright, cg * bright, cb * bright);
+                    compatVertex(vc, mat, br.add(fv), u1, vT, normal, cr * bright, cg * bright, cb * bright);
+                    compatVertex(vc, mat, br, u1, vB, normal, cr * bright, cg * bright, cb * bright);
+                } else {
+                    compatVertex(vc, mat, bl, u0, vB, normal, cr * bright, cg * bright, cb * bright);
+                    compatVertex(vc, mat, br, u1, vB, normal, cr * bright, cg * bright, cb * bright);
+                    compatVertex(vc, mat, br.add(fv), u1, vT, normal, cr * bright, cg * bright, cb * bright);
+                    compatVertex(vc, mat, bl.add(fv), u0, vT, normal, cr * bright, cg * bright, cb * bright);
+                }
             }
         }
     }

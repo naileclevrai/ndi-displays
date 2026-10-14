@@ -97,12 +97,23 @@ public class NdiDisplays {
      * rectangle, like the walls, but drawn on the XZ plane so you can walk on it.
      */
     public static final RegistryObject<Block> LED_FLOOR = BLOCKS.register("led_floor",
-            () -> new dev.nano.ndidisplays.block.LedFloorBlock(BlockBehaviour.Properties.of()
-                    .mapColor(MapColor.COLOR_BLACK)
-                    .strength(1.5F)
-                    .sound(SoundType.METAL)
-                    .noOcclusion()
-                    .lightLevel(state -> 0)));
+            () -> new dev.nano.ndidisplays.block.LedFloorBlock(floorProperties()));
+
+    /**
+     * The floor tile hung from a ceiling. No item of its own: the floor item places it
+     * when the click is on the underside of a block. Breaking it gives the floor item back.
+     */
+    public static final RegistryObject<Block> LED_CEILING = BLOCKS.register("led_ceiling",
+            () -> new dev.nano.ndidisplays.block.LedFloorBlock(floorProperties(), true));
+
+    private static BlockBehaviour.Properties floorProperties() {
+        return BlockBehaviour.Properties.of()
+                .mapColor(MapColor.COLOR_BLACK)
+                .strength(1.5F)
+                .sound(SoundType.METAL)
+                .noOcclusion()
+                .lightLevel(state -> 0);
+    }
 
     public static final RegistryObject<Item> LED_FLOOR_ITEM = ITEMS.register("led_floor",
             () -> new BlockItem(LED_FLOOR.get(), new Item.Properties()));
@@ -110,7 +121,7 @@ public class NdiDisplays {
     public static final RegistryObject<BlockEntityType<dev.nano.ndidisplays.block.LedFloorBlockEntity>> LED_FLOOR_BE =
             BLOCK_ENTITIES.register("led_floor",
                     () -> BlockEntityType.Builder.of(dev.nano.ndidisplays.block.LedFloorBlockEntity::new,
-                            LED_FLOOR.get()).build(null));
+                            LED_FLOOR.get(), LED_CEILING.get()).build(null));
 
     /**
      * Kinetic winch: flies an LED video tile below itself on rendered cables — the

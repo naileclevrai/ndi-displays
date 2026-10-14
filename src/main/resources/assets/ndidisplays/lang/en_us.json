@@ -2,6 +2,7 @@
  "block.ndidisplays.led_panel": "LED Wall Panel",
  "block.ndidisplays.blow_through_panel": "Blow-Through LED Panel",
  "block.ndidisplays.led_floor": "LED Floor Tile",
+ "block.ndidisplays.led_ceiling": "LED Ceiling Tile",
  "itemGroup.ndidisplays": "NDI Stage Displays",
  "item.ndidisplays.tab_icon": "NDI Stage Displays",
  "gui.ndidisplays.config.title": "LED Wall Processor",

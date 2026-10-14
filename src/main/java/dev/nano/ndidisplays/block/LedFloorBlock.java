@@ -25,15 +25,31 @@ import javax.annotation.Nullable;
 /**
  * Walkable LED floor tile. FACING is the direction of the image's top (v=0).
  * Adjacent tiles of the same facing merge into one video rectangle, like a wall.
+ *
+ * The same class hung from a ceiling is a slab at the top of the block, picture
+ * facing down into the room. Floor and ceiling tiles do not merge with each other.
  */
 public class LedFloorBlock extends HorizontalDirectionalBlock implements EntityBlock {
 
-    /** Slim walkable slab, 2 pixels tall — collision matches the visual cabinet. */
+    /** Slim slab, 2 pixels thick — collision matches the visual cabinet. */
     private static final VoxelShape SHAPE = Block.box(0, 0, 0, 16, 2, 16);
+    /** Same slab, stuck to the ceiling. */
+    private static final VoxelShape CEILING_SHAPE = Block.box(0, 14, 0, 16, 16, 16);
+
+    private final boolean ceiling;
 
     public LedFloorBlock(Properties properties) {
+        this(properties, false);
+    }
+
+    public LedFloorBlock(Properties properties, boolean ceiling) {
         super(properties);
+        this.ceiling = ceiling;
         registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH));
+    }
+
+    public boolean isCeiling() {
+        return ceiling;
     }
 
     @Override
@@ -44,18 +60,35 @@ public class LedFloorBlock extends HorizontalDirectionalBlock implements EntityB
     @Override
     @Nullable
     public BlockState getStateForPlacement(BlockPlaceContext ctx) {
+        // Clicking the underside of a block, or the side of a tile already on the ceiling,
+        // hangs the next tile up there. Anywhere else it stays a walkable floor.
+        Direction face = ctx.getClickedFace();
+        BlockState clicked = ctx.getLevel().getBlockState(ctx.getClickedPos());
+        boolean ontoCeiling = face == Direction.DOWN
+                || (face.getAxis().isHorizontal()
+                && clicked.getBlock() instanceof LedFloorBlock existing
+                && existing.ceiling);
+        LedFloorBlock block = ontoCeiling
+                ? (LedFloorBlock) dev.nano.ndidisplays.NdiDisplays.LED_CEILING.get()
+                : (LedFloorBlock) dev.nano.ndidisplays.NdiDisplays.LED_FLOOR.get();
         // Image top points the way the player is looking, like a floor processor's orientation.
-        return defaultBlockState().setValue(FACING, ctx.getHorizontalDirection());
+        return block.defaultBlockState().setValue(FACING, ctx.getHorizontalDirection());
     }
 
     @Override
     public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext ctx) {
-        return SHAPE;
+        return ceiling ? CEILING_SHAPE : SHAPE;
     }
 
     @Override
     public VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext ctx) {
-        return SHAPE;
+        return ceiling ? CEILING_SHAPE : SHAPE;
+    }
+
+    @Override
+    public net.minecraft.world.item.ItemStack getCloneItemStack(BlockGetter level, BlockPos pos, BlockState state) {
+        // Middle-click on a ceiling tile still gives the floor item, which is what places it.
+        return new net.minecraft.world.item.ItemStack(dev.nano.ndidisplays.NdiDisplays.LED_FLOOR_ITEM.get());
     }
 
     @Override
