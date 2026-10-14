@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1-beta.1] - 2026-10-14
+
+CurseForge beta. Ship **`ndidisplays-1.20.1-1.4.1-beta.1-all.jar`**.
+
+### Added
+
+- LED floor tiles hang from the ceiling. Click the underside of a block with the floor item and the slab sticks to the top of the cell, picture facing down into the room. Click the side of a tile already on the ceiling to continue it. Ceiling tiles stitch into one screen with each other, not with the floor. Breaking one gives the floor item back.
+
 ## [1.1.4] - 2026-10-12
 
 Fifth CurseForge release. Stable. Ship **`ndidisplays-1.20.1-1.1.4-all.jar`**.
@@ -155,7 +163,8 @@ First public CurseForge beta. Ship **`ndidisplays-1.20.1-1.1.0-beta.1-all.jar`**
 
 Upstream [nanocodium/ndi-displays](https://github.com/nanocodium/ndi-displays) `main` at `32d691b` before this beta. Notes for that tree now live under [1.1.0-beta.1].
 
-[Unreleased]: https://github.com/nanocodium/ndi-displays/compare/1.1.4...HEAD
+[Unreleased]: https://github.com/nanocodium/ndi-displays/compare/1.4.1-beta.1...HEAD
+[1.4.1-beta.1]: https://github.com/nanocodium/ndi-displays/compare/1.1.4...1.4.1-beta.1
 [1.1.4]: https://github.com/nanocodium/ndi-displays/compare/1.1.3...1.1.4
 [1.1.3]: https://github.com/nanocodium/ndi-displays/compare/1.1.2-beta.1...1.1.3
 [1.1.2-beta.1]: https://github.com/nanocodium/ndi-displays/compare/1.1.1-beta.1...1.1.2-beta.1

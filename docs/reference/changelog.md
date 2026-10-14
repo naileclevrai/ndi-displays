@@ -3,9 +3,17 @@
 This page follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The same notes live in [`CHANGELOG.md`](https://github.com/nanocodium/ndi-displays/blob/main/CHANGELOG.md) at the repo root.
 
-Current artifact: **`ndidisplays-1.20.1-1.1.4-all.jar`** — Minecraft **1.20.1**, Forge **47.x**, Java 17.
+Current artifact: **`ndidisplays-1.20.1-1.4.1-beta.1-all.jar`** — Minecraft **1.20.1**, Forge **47.x**, Java 17.
 
 ## [Unreleased]
+
+## [1.4.1-beta.1] - 2026-10-14
+
+CurseForge beta.
+
+### Added
+
+- [LED floor](/blocks/led-floor): click the underside of a block and the tile hangs on the ceiling, picture facing down. Side clicks on a ceiling tile continue it. Ceiling tiles stitch together, not with the floor. Breaking one returns the floor item.
 
 ## [1.1.4] - 2026-10-12
 
@@ -147,7 +155,8 @@ First public CurseForge beta. Everything in this jar.
 
 Upstream `main` at `32d691b` before this beta. Notes for that tree now live under [1.1.0-beta.1].
 
-[Unreleased]: https://github.com/nanocodium/ndi-displays/compare/1.1.4...HEAD
+[Unreleased]: https://github.com/nanocodium/ndi-displays/compare/1.4.1-beta.1...HEAD
+[1.4.1-beta.1]: https://github.com/nanocodium/ndi-displays/compare/1.1.4...1.4.1-beta.1
 [1.1.4]: https://github.com/nanocodium/ndi-displays/compare/1.1.3...1.1.4
 [1.1.3]: https://github.com/nanocodium/ndi-displays/compare/1.1.2-beta.1...1.1.3
 [1.1.2-beta.1]: https://github.com/nanocodium/ndi-displays/compare/1.1.1-beta.1...1.1.2-beta.1
